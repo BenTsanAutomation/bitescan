@@ -1,6 +1,9 @@
-// BiteScan Auth Service — Supabase Auth with email verification
-import { supabase } from './supabase';
-import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
+// BiteScan Auth Service — Convex-backed with local session persistence
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { convex } from "./convexClient";
+import { api } from "../../convex/_generated/api";
+
+const SESSION_TOKEN_KEY = "bitescan_session_token";
 
 export interface AuthUser {
   id: string;
@@ -9,133 +12,111 @@ export interface AuthUser {
   emailVerified: boolean;
 }
 
-export interface AuthSession {
-  user: AuthUser;
-  session: Session;
-}
-
-function mapUser(user: SupabaseUser): AuthUser {
-  return {
-    id: user.id,
-    email: user.email ?? '',
-    displayName:
-      user.user_metadata?.display_name ??
-      user.email?.split('@')[0] ??
-      'User',
-    emailVerified: !!user.email_confirmed_at,
-  };
-}
-
 /**
- * Sign up with email + password. Supabase sends a verification email automatically.
- * The user can use the app immediately but `emailVerified` will be false until they confirm.
+ * Sign up with email + password.
+ * Returns the verification code (in production this would be emailed).
  */
 export async function signUp(
   email: string,
   password: string,
   displayName: string
-): Promise<AuthUser> {
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const { data, error } = await supabase.auth.signUp({
-    email: normalizedEmail,
+): Promise<{ user: AuthUser; verificationCode: string }> {
+  const result = await convex.mutation(api.auth.signUp, {
+    email,
     password,
-    options: {
-      data: { display_name: displayName.trim() },
-    },
+    displayName,
   });
 
-  if (error) throw new Error(error.message);
-  if (!data.user) throw new Error('Signup failed — no user returned');
-
-  return mapUser(data.user);
+  return {
+    user: {
+      id: result.externalId,
+      email: result.email,
+      displayName: result.displayName,
+      emailVerified: false,
+    },
+    verificationCode: result.verificationCode,
+  };
 }
 
 /**
- * Sign in with email + password.
+ * Verify email with 6-digit code.
+ */
+export async function verifyEmail(
+  email: string,
+  code: string
+): Promise<void> {
+  await convex.mutation(api.auth.verifyEmail, { email, code });
+}
+
+/**
+ * Sign in with email + password. Requires verified email.
  */
 export async function signIn(
   email: string,
   password: string
 ): Promise<AuthUser> {
-  const normalizedEmail = email.trim().toLowerCase();
+  const result = await convex.mutation(api.auth.signIn, { email, password });
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: normalizedEmail,
-    password,
-  });
+  // Store session token
+  await AsyncStorage.setItem(SESSION_TOKEN_KEY, result.token);
 
-  if (error) throw new Error(error.message);
-  if (!data.user) throw new Error('Sign-in failed — no user returned');
-
-  // Block unverified users
-  if (!data.user.email_confirmed_at) {
-    await supabase.auth.signOut(); // Clear the session
-    throw new Error('Please verify your email before signing in. Check your inbox for the confirmation link.');
-  }
-
-  return mapUser(data.user);
+  return result.user;
 }
 
 /**
  * Sign out and clear session.
  */
 export async function signOut(): Promise<void> {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw new Error(error.message);
+  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
+  if (token) {
+    try {
+      await convex.mutation(api.auth.signOut, { token });
+    } catch {
+      // Ignore errors during sign out
+    }
+  }
+  await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
 }
 
 /**
- * Get the current session if one exists (persisted via AsyncStorage).
+ * Get stored session from AsyncStorage and validate with Convex.
  */
 export async function getStoredSession(): Promise<AuthUser | null> {
-  const { data, error } = await supabase.auth.getSession();
-  if (error || !data.session?.user) return null;
-  return mapUser(data.session.user);
+  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
+  if (!token) return null;
+
+  try {
+    const user = await convex.query(api.auth.validateSession, { token });
+    if (!user) {
+      await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+      return null;
+    }
+    return user;
+  } catch {
+    await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+    return null;
+  }
 }
 
 /**
- * Resend the verification email for the current user.
+ * Resend verification code.
  */
-export async function resendVerificationEmail(): Promise<void> {
-  const { data } = await supabase.auth.getUser();
-  if (!data.user?.email) throw new Error('No user email found');
+export async function resendVerificationEmail(
+  email: string
+): Promise<string> {
+  const result = await convex.mutation(api.auth.resendVerification, { email });
+  return result.verificationCode;
+}
 
-  const { error } = await supabase.auth.resend({
-    type: 'signup',
-    email: data.user.email,
+/**
+ * Update user preferences in Convex.
+ */
+export async function updatePreferencesRemote(
+  externalUserId: string,
+  preferencesJson: string
+): Promise<void> {
+  await convex.mutation(api.auth.updatePreferences, {
+    externalUserId,
+    preferencesJson,
   });
-
-  if (error) throw new Error(error.message);
-}
-
-/**
- * Refresh the user from Supabase to get updated email_confirmed_at.
- */
-export async function refreshUser(): Promise<AuthUser | null> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return null;
-  return mapUser(data.user);
-}
-
-/**
- * Send a password reset email.
- */
-export async function resetPassword(email: string): Promise<void> {
-  const { error } = await supabase.auth.resetPasswordForEmail(
-    email.trim().toLowerCase()
-  );
-  if (error) throw new Error(error.message);
-}
-
-/**
- * Listen to auth state changes (login, logout, token refresh, etc.)
- */
-export function onAuthStateChange(
-  callback: (user: AuthUser | null) => void
-): { unsubscribe: () => void } {
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    callback(session?.user ? mapUser(session.user) : null);
-  });
-  return { unsubscribe: data.subscription.unsubscribe };
 }

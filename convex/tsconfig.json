@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "outDir": "./_generated"
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["./_generated"]
+}

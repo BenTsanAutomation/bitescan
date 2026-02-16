@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -8,36 +8,22 @@ import {
   StyleSheet,
   Text,
   View,
-} from 'react-native';
-import { borderRadius, colors, shadows, spacing, typography } from './src/theme';
-import {
-  addMealEntry,
-  createUser,
-  getMacroTotalsForDate,
-  getMealDaysWithEntries,
-  getMealsForDate,
-  getOrCreateTodayLog,
-  getRemainingMacros,
-  getUser,
-  getUserStreak,
-  getWeeklyMacroSummary,
-  initDatabase,
-  recordUserActivity,
-  saveScan,
-  updateUserPreferences,
-} from './src/services/database';
-import { analyzeFoodImage, checkApiHealth, imageToBase64 } from './src/services/api';
+} from "react-native";
+import { ConvexProvider } from "convex/react";
+import { convex } from "./src/services/convexClient";
+import { borderRadius, colors, shadows, spacing, typography } from "./src/theme";
 import {
   AuthUser,
   getStoredSession,
-  onAuthStateChange,
   signIn,
   signOut,
   signUp,
-} from './src/services/auth';
-import AuthScreen from './src/screens/AuthScreen';
-import EmailVerificationBanner from './src/components/EmailVerificationBanner';
-import { syncProfileToCloud, syncStreakToCloud } from './src/services/sync';
+  verifyEmail,
+  resendVerificationEmail,
+  updatePreferencesRemote,
+} from "./src/services/auth";
+import { api } from "./convex/_generated/api";
+import AuthScreen from "./src/screens/AuthScreen";
 import {
   DailyMacroSummary,
   MacroRemaining,
@@ -45,18 +31,18 @@ import {
   MacroTotals,
   RecentMeal,
   ScanResult,
-  User,
   UserPreferences,
   UserStreak,
-} from './src/types';
-import { CameraScreen } from './src/screens/CameraScreen';
-import { ResultsScreen } from './src/screens/ResultsScreen';
-import { SettingsScreen } from './src/screens/SettingsScreen';
-import MacroGoalsScreen from './src/screens/MacroGoalsScreen';
-import ManualEntryScreen from './src/screens/ManualEntryScreen';
-import HomeScreen from './src/screens/HomeScreen';
-import ProgressScreen from './src/screens/ProgressScreen';
-import { LeafParticles } from './src/animations/LeafParticles';
+} from "./src/types";
+import { analyzeFoodImage, checkApiHealth, imageToBase64 } from "./src/services/api";
+import { CameraScreen } from "./src/screens/CameraScreen";
+import { ResultsScreen } from "./src/screens/ResultsScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
+import MacroGoalsScreen from "./src/screens/MacroGoalsScreen";
+import ManualEntryScreen from "./src/screens/ManualEntryScreen";
+import HomeScreen from "./src/screens/HomeScreen";
+import ProgressScreen from "./src/screens/ProgressScreen";
+import { LeafParticles } from "./src/animations/LeafParticles";
 
 const DEFAULT_SKIP_TARGETS: MacroTargets = {
   calories: 2000,
@@ -65,8 +51,15 @@ const DEFAULT_SKIP_TARGETS: MacroTargets = {
   fat: 70,
 };
 
-type TabKey = 'home' | 'progress' | 'history' | 'profile';
-type OverlayScreen = 'tabs' | 'camera' | 'results' | 'manual' | 'settings';
+type TabKey = "home" | "progress" | "history" | "profile";
+type OverlayScreen = "tabs" | "camera" | "results" | "manual" | "settings";
+
+interface UserData {
+  id: string;
+  email: string;
+  displayName: string;
+  preferences: UserPreferences;
+}
 
 const hasMacroTargets = (targets?: MacroTargets): boolean =>
   !!targets && targets.calories > 0 && targets.protein > 0;
@@ -74,23 +67,47 @@ const hasMacroTargets = (targets?: MacroTargets): boolean =>
 const getTodayDateString = (): string => {
   const now = new Date();
   const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
 
-const buildRemainingFromTotals = (totals: MacroTotals, targets: MacroTargets): MacroRemaining => ({
+const getDateRange = (days: number): string[] => {
+  const range: string[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - i);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    range.push(`${year}-${month}-${day}`);
+  }
+  return range;
+};
+
+const buildRemainingFromTotals = (
+  totals: MacroTotals,
+  targets: MacroTargets
+): MacroRemaining => ({
   calories: targets.calories - totals.calories,
   protein: targets.protein - totals.protein,
   carbs: targets.carbs - totals.carbs,
   fat: targets.fat - totals.fat,
-  caloriesPct: targets.calories > 0 ? (totals.calories / targets.calories) * 100 : 0,
-  proteinPct: targets.protein > 0 ? (totals.protein / targets.protein) * 100 : 0,
+  caloriesPct:
+    targets.calories > 0 ? (totals.calories / targets.calories) * 100 : 0,
+  proteinPct:
+    targets.protein > 0 ? (totals.protein / targets.protein) * 100 : 0,
   carbsPct: targets.carbs > 0 ? (totals.carbs / targets.carbs) * 100 : 0,
   fatPct: targets.fat > 0 ? (totals.fat / targets.fat) * 100 : 0,
 });
 
-const EMPTY_TOTALS: MacroTotals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+const EMPTY_TOTALS: MacroTotals = {
+  calories: 0,
+  protein: 0,
+  carbs: 0,
+  fat: 0,
+};
 
 const ResultsScreenWithRemaining = ResultsScreen as React.ComponentType<
   React.ComponentProps<typeof ResultsScreen> & {
@@ -98,27 +115,29 @@ const ResultsScreenWithRemaining = ResultsScreen as React.ComponentType<
   }
 >;
 
-export default function App() {
+function AppInner() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showMacroGoals, setShowMacroGoals] = useState(false);
   const [apiHealthy, setApiHealthy] = useState(false);
-  const [verificationDismissed, setVerificationDismissed] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<TabKey>('home');
-  const [overlayScreen, setOverlayScreen] = useState<OverlayScreen>('tabs');
+  const [activeTab, setActiveTab] = useState<TabKey>("home");
+  const [overlayScreen, setOverlayScreen] = useState<OverlayScreen>("tabs");
 
-  const currentUserId = authUser?.id ?? '';
+  const currentUserId = authUser?.id ?? "";
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
 
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());
+  const [selectedDate, setSelectedDate] = useState<string>(
+    getTodayDateString()
+  );
   const [dayTotals, setDayTotals] = useState<MacroTotals>(EMPTY_TOTALS);
-  const [remainingMacros, setRemainingMacros] = useState<MacroRemaining | null>(null);
+  const [remainingMacros, setRemainingMacros] =
+    useState<MacroRemaining | null>(null);
   const [recentMeals, setRecentMeals] = useState<RecentMeal[]>([]);
   const [daysWithMeals, setDaysWithMeals] = useState<string[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<DailyMacroSummary[]>([]);
@@ -134,68 +153,98 @@ export default function App() {
     };
   }, [user]);
 
+  // ---- Load dashboard data from Convex ----
   const loadDashboardData = useCallback(
-    async (date: string, currentUser: User | null) => {
+    async (date: string, currentUser: UserData | null) => {
       if (!currentUserId) return;
-      const [totals, meals, dayKeys, weekly, streakRow] = await Promise.all([
-        getMacroTotalsForDate(currentUserId, date),
-        getMealsForDate(currentUserId, date),
-        getMealDaysWithEntries(currentUserId, 7),
-        getWeeklyMacroSummary(currentUserId, 7),
-        getUserStreak(currentUserId),
-      ]);
 
-      setDayTotals(totals);
-      setRecentMeals(meals);
-      setDaysWithMeals(dayKeys);
-      setWeeklySummary(weekly);
-      setStreak(streakRow);
+      try {
+        const weekDates = getDateRange(7);
 
-      const today = getTodayDateString();
-      if (date === today) {
-        try {
-          const remaining = await getRemainingMacros(currentUserId);
+        const [totals, meals, weeklyData, daysWithMealsList, streakData] =
+          await Promise.all([
+            convex.query(api.meals.getMacroTotalsForDate, {
+              externalUserId: currentUserId,
+              date,
+            }),
+            convex.query(api.meals.getMealsForDate, {
+              externalUserId: currentUserId,
+              date,
+            }),
+            convex.query(api.meals.getWeeklyMacroSummary, {
+              externalUserId: currentUserId,
+              dates: weekDates,
+            }),
+            convex.query(api.meals.getMealDaysWithEntries, {
+              externalUserId: currentUserId,
+              dates: weekDates,
+            }),
+            convex.query(api.meals.getStreak, {
+              externalUserId: currentUserId,
+            }),
+          ]);
+
+        setDayTotals(totals);
+        setRecentMeals(
+          meals.map((m: any) => ({
+            id: m.id as string,
+            logId: m.logId as string,
+            scanId: m.scanId ?? undefined,
+            foodName: m.foodName,
+            calories: m.calories,
+            protein: m.protein,
+            carbs: m.carbs,
+            fat: m.fat,
+            timestamp: m.timestamp,
+            imageUri: m.imageUri ?? undefined,
+          }))
+        );
+        setWeeklySummary(weeklyData);
+        setDaysWithMeals(daysWithMealsList);
+        setStreak({
+          userId: currentUserId,
+          currentStreak: streakData.currentStreak,
+          longestStreak: streakData.longestStreak,
+          lastActiveDate: streakData.lastActiveDate ?? null,
+        });
+
+        const today = getTodayDateString();
+        if (date === today) {
+          const remaining = await convex.query(api.meals.getRemainingMacros, {
+            externalUserId: currentUserId,
+            date: today,
+          });
           setRemainingMacros(remaining);
-          return;
-        } catch (error) {
-          console.error('Failed to load remaining macros:', error);
+        } else {
+          const targets =
+            currentUser?.preferences.macroTargets ?? DEFAULT_SKIP_TARGETS;
+          setRemainingMacros(buildRemainingFromTotals(totals, targets));
         }
+      } catch (error) {
+        console.error("Failed to load dashboard data:", error);
       }
-
-      const targets = currentUser?.preferences.macroTargets ?? DEFAULT_SKIP_TARGETS;
-      setRemainingMacros(buildRemainingFromTotals(totals, targets));
     },
     [currentUserId]
   );
 
-  // Phase 1: Initialize local DB + check Supabase session
+  // ---- Phase 1: Check auth session ----
   useEffect(() => {
     async function initApp() {
       try {
-        await initDatabase();
-
-        // Check for existing Supabase session
         const storedUser = await getStoredSession();
         if (storedUser) {
           setAuthUser(storedUser);
         }
       } catch (error) {
-        console.error('Init error:', error);
+        console.error("Init error:", error);
       } finally {
         setAuthChecked(true);
       }
     }
     void initApp();
-
-    // Listen for auth state changes (login/logout/token refresh)
-    const { unsubscribe } = onAuthStateChange((updatedUser) => {
-      setAuthUser(updatedUser);
-    });
-
-    return () => unsubscribe();
   }, []);
 
-  // Phase 2: Load user data once authenticated
+  // ---- Phase 2: Load user data ----
   useEffect(() => {
     if (!authUser) {
       setIsLoading(false);
@@ -207,30 +256,49 @@ export default function App() {
       try {
         const healthy = await checkApiHealth();
         setApiHealthy(healthy);
-        if (!healthy) console.warn('BiteScan API not available');
+        if (!healthy) console.warn("BiteScan API not available");
 
-        // Ensure local SQLite user row exists (uses Supabase UUID as ID)
-        let existingUser = await getUser(authUser!.id);
-        if (!existingUser) {
-          existingUser = await createUser({
-            id: authUser!.id,
-            email: authUser!.email,
-            displayName: authUser!.displayName,
-          });
+        // Get profile from Convex
+        const profile = await convex.query(api.auth.getProfile, {
+          externalUserId: authUser!.id,
+        });
+
+        let prefs: UserPreferences = { goals: [], priorities: {} };
+        if (profile?.preferencesJson) {
+          try {
+            prefs = JSON.parse(profile.preferencesJson);
+          } catch {
+            // Keep defaults
+          }
         }
 
-        setUser(existingUser);
+        const userData: UserData = {
+          id: authUser!.id,
+          email: authUser!.email,
+          displayName: authUser!.displayName,
+          preferences: prefs,
+        };
 
-        const needsMacroGoals = !hasMacroTargets(existingUser.preferences.macroTargets);
+        setUser(userData);
+
+        const needsMacroGoals = !hasMacroTargets(prefs.macroTargets);
         setShowMacroGoals(needsMacroGoals);
 
         if (!needsMacroGoals) {
-          await getOrCreateTodayLog(authUser!.id);
-          await loadDashboardData(getTodayDateString(), existingUser);
+          // Ensure today's log exists
+          await convex.mutation(api.meals.getOrCreateDailyLog, {
+            externalUserId: authUser!.id,
+            date: getTodayDateString(),
+            targetCalories: prefs.macroTargets?.calories ?? DEFAULT_SKIP_TARGETS.calories,
+            targetProtein: prefs.macroTargets?.protein ?? DEFAULT_SKIP_TARGETS.protein,
+            targetCarbs: prefs.macroTargets?.carbs ?? DEFAULT_SKIP_TARGETS.carbs,
+            targetFat: prefs.macroTargets?.fat ?? DEFAULT_SKIP_TARGETS.fat,
+          });
+          await loadDashboardData(getTodayDateString(), userData);
         }
       } catch (error) {
-        console.error('Load user error:', error);
-        Alert.alert('Error', 'Failed to load user data');
+        console.error("Load user error:", error);
+        Alert.alert("Error", "Failed to load user data");
       } finally {
         setIsLoading(false);
       }
@@ -238,16 +306,24 @@ export default function App() {
     void loadUser();
   }, [authUser, loadDashboardData]);
 
-  const handleAuthComplete = useCallback(async (authedUser: AuthUser, _isNewUser: boolean) => {
-    setAuthUser(authedUser);
-  }, []);
+  useEffect(() => {
+    if (!user || showMacroGoals || !authUser) return;
+    void loadDashboardData(selectedDate, user);
+  }, [loadDashboardData, selectedDate, showMacroGoals, user, authUser]);
+
+  const handleAuthComplete = useCallback(
+    async (authedUser: AuthUser, _isNewUser: boolean) => {
+      setAuthUser(authedUser);
+    },
+    []
+  );
 
   const handleSignOut = useCallback(async () => {
     await signOut();
     setAuthUser(null);
     setUser(null);
-    setOverlayScreen('tabs');
-    setActiveTab('home');
+    setOverlayScreen("tabs");
+    setActiveTab("home");
     setShowMacroGoals(false);
     setDayTotals(EMPTY_TOTALS);
     setRemainingMacros(null);
@@ -258,19 +334,17 @@ export default function App() {
     setSelectedDate(getTodayDateString());
   }, []);
 
-  useEffect(() => {
-    if (!user || showMacroGoals) return;
-    void loadDashboardData(selectedDate, user);
-  }, [loadDashboardData, selectedDate, showMacroGoals, user]);
-
   const handleUpdatePreferences = useCallback(
     async (prefs: UserPreferences) => {
-      await updateUserPreferences(currentUserId, prefs);
-      // Sync to cloud (fire-and-forget)
-      syncProfileToCloud(currentUserId, prefs).catch((e) =>
-        console.error('Cloud sync failed:', e)
-      );
-      const updatedUser: User | null = user ? { ...user, preferences: prefs } : null;
+      // Sync to Convex
+      updatePreferencesRemote(
+        currentUserId,
+        JSON.stringify(prefs)
+      ).catch((e) => console.error("Cloud sync failed:", e));
+
+      const updatedUser: UserData | null = user
+        ? { ...user, preferences: prefs }
+        : null;
       setUser(updatedUser);
       setShowMacroGoals(!hasMacroTargets(prefs.macroTargets));
       if (updatedUser) {
@@ -293,15 +367,28 @@ export default function App() {
 
       try {
         await handleUpdatePreferences(prefs);
-        await getOrCreateTodayLog(currentUserId);
+
+        // Create today's log with new targets
+        await convex.mutation(api.meals.getOrCreateDailyLog, {
+          externalUserId: currentUserId,
+          date: getTodayDateString(),
+          targetCalories: targets.calories,
+          targetProtein: targets.protein,
+          targetCarbs: targets.carbs,
+          targetFat: targets.fat,
+        });
+
         setShowMacroGoals(false);
-        await loadDashboardData(getTodayDateString(), { ...user, preferences: prefs });
+        await loadDashboardData(getTodayDateString(), {
+          ...user,
+          preferences: prefs,
+        });
       } catch (error) {
-        console.error('Failed to save macro goals:', error);
-        Alert.alert('Error', 'Could not save macro goals');
+        console.error("Failed to save macro goals:", error);
+        Alert.alert("Error", "Could not save macro goals");
       }
     },
-    [handleUpdatePreferences, loadDashboardData, user]
+    [currentUserId, handleUpdatePreferences, loadDashboardData, user]
   );
 
   const handleSkipMacroGoals = useCallback(async () => {
@@ -312,17 +399,22 @@ export default function App() {
     async (imageUri: string) => {
       setCapturedImage(imageUri);
       setIsAnalyzing(true);
-      setOverlayScreen('results');
+      setOverlayScreen("results");
 
       try {
         const base64 = await imageToBase64(imageUri);
-        const result = await analyzeFoodImage(base64, user?.preferences || { goals: [], priorities: {} });
+        const result = await analyzeFoodImage(
+          base64,
+          user?.preferences || { goals: [], priorities: {} }
+        );
         setScanResult(result);
       } catch (error) {
-        console.error('Analysis error:', error);
-        Alert.alert('Analysis Failed', 'Could not analyze the image. Please try again.', [
-          { text: 'OK', onPress: () => setOverlayScreen('tabs') },
-        ]);
+        console.error("Analysis error:", error);
+        Alert.alert(
+          "Analysis Failed",
+          "Could not analyze the image. Please try again.",
+          [{ text: "OK", onPress: () => setOverlayScreen("tabs") }]
+        );
       } finally {
         setIsAnalyzing(false);
       }
@@ -335,7 +427,18 @@ export default function App() {
 
     try {
       const today = getTodayDateString();
-      const log = await getOrCreateTodayLog(currentUserId);
+
+      // Ensure today's log exists
+      const log = await convex.mutation(api.meals.getOrCreateDailyLog, {
+        externalUserId: currentUserId,
+        date: today,
+        targetCalories: macroTargets.calories,
+        targetProtein: macroTargets.protein,
+        targetCarbs: macroTargets.carbs,
+        targetFat: macroTargets.fat,
+      });
+
+      if (!log) throw new Error("Failed to get daily log");
 
       const macroTotals = scanResult.foods.reduce(
         (acc, food) => ({
@@ -351,12 +454,20 @@ export default function App() {
           .map((food) => food.name)
           .filter(Boolean)
           .slice(0, 3)
-          .join(', ') || 'Scanned Meal';
+          .join(", ") || "Scanned Meal";
 
-      await saveScan(currentUserId, capturedImage, scanResult);
+      // Save scan to Convex
+      await convex.mutation(api.meals.saveScan, {
+        externalUserId: currentUserId,
+        scanId: scanResult.id,
+        imageUri: capturedImage,
+        resultJson: JSON.stringify(scanResult),
+      });
 
-      await addMealEntry(log.id, {
-        logId: log.id,
+      // Add meal entry
+      await convex.mutation(api.meals.addMealEntry, {
+        dailyLogId: log._id,
+        externalUserId: currentUserId,
         scanId: scanResult.id,
         foodName: mealName,
         calories: scanResult.totalCalories,
@@ -366,28 +477,56 @@ export default function App() {
         timestamp: Date.now(),
       });
 
-      await recordUserActivity(currentUserId, today);
+      // Record activity for streak
+      await convex.mutation(api.meals.recordActivity, {
+        externalUserId: currentUserId,
+        date: today,
+      });
 
       setSelectedDate(today);
       await loadDashboardData(today, user);
 
-      setOverlayScreen('tabs');
-      setActiveTab('home');
-      Alert.alert('Saved!', "Scan saved and logged to today's meals");
+      setOverlayScreen("tabs");
+      setActiveTab("home");
+      Alert.alert("Saved!", "Scan saved and logged to today's meals");
     } catch (error) {
-      console.error('Save error:', error);
-      Alert.alert('Error', 'Failed to save scan');
+      console.error("Save error:", error);
+      Alert.alert("Error", "Failed to save scan");
     }
-  }, [capturedImage, loadDashboardData, scanResult, user]);
+  }, [
+    capturedImage,
+    currentUserId,
+    loadDashboardData,
+    macroTargets,
+    scanResult,
+    user,
+  ]);
 
   const handleManualEntrySave = useCallback(
-    async (entry: { foodName: string; calories: number; protein: number; carbs: number; fat: number }) => {
+    async (entry: {
+      foodName: string;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }) => {
       try {
         const today = getTodayDateString();
-        const log = await getOrCreateTodayLog(currentUserId);
 
-        await addMealEntry(log.id, {
-          logId: log.id,
+        const log = await convex.mutation(api.meals.getOrCreateDailyLog, {
+          externalUserId: currentUserId,
+          date: today,
+          targetCalories: macroTargets.calories,
+          targetProtein: macroTargets.protein,
+          targetCarbs: macroTargets.carbs,
+          targetFat: macroTargets.fat,
+        });
+
+        if (!log) throw new Error("Failed to get daily log");
+
+        await convex.mutation(api.meals.addMealEntry, {
+          dailyLogId: log._id,
+          externalUserId: currentUserId,
           foodName: entry.foodName,
           calories: entry.calories,
           protein: entry.protein,
@@ -396,18 +535,23 @@ export default function App() {
           timestamp: Date.now(),
         });
 
-        await recordUserActivity(currentUserId, today);
+        await convex.mutation(api.meals.recordActivity, {
+          externalUserId: currentUserId,
+          date: today,
+        });
 
         setSelectedDate(today);
         await loadDashboardData(today, user);
-        setOverlayScreen('tabs');
+        setOverlayScreen("tabs");
       } catch (error) {
-        console.error('Manual entry save error:', error);
-        Alert.alert('Error', 'Failed to save manual entry');
+        console.error("Manual entry save error:", error);
+        Alert.alert("Error", "Failed to save manual entry");
       }
     },
-    [loadDashboardData, user]
+    [currentUserId, loadDashboardData, macroTargets, user]
   );
+
+  // ---- RENDER ----
 
   if (!authChecked || (authUser && isLoading)) {
     return (
@@ -424,6 +568,8 @@ export default function App() {
         onAuthenticated={handleAuthComplete}
         onSignIn={signIn}
         onSignUp={signUp}
+        onVerifyEmail={verifyEmail}
+        onResendCode={resendVerificationEmail}
       />
     );
   }
@@ -432,39 +578,58 @@ export default function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" />
-        <MacroGoalsScreen onSave={handleSaveMacroGoals} onSkip={handleSkipMacroGoals} />
+        <MacroGoalsScreen
+          onSave={handleSaveMacroGoals}
+          onSkip={handleSkipMacroGoals}
+        />
       </SafeAreaView>
     );
   }
 
-  if (overlayScreen === 'manual') {
-    return <ManualEntryScreen onSave={handleManualEntrySave} onCancel={() => setOverlayScreen('tabs')} />;
-  }
-
-  if (overlayScreen === 'settings' && user) {
+  if (overlayScreen === "manual") {
     return (
-      <SettingsScreen
-        user={user}
-        onSave={(prefs) => {
-          void handleUpdatePreferences(prefs);
-        }}
-        onClose={() => setOverlayScreen('tabs')}
+      <ManualEntryScreen
+        onSave={handleManualEntrySave}
+        onCancel={() => setOverlayScreen("tabs")}
       />
     );
   }
 
-  if (overlayScreen === 'camera') {
-    return <CameraScreen onCapture={handleCapture} onClose={() => setOverlayScreen('tabs')} />;
+  if (overlayScreen === "settings" && user) {
+    return (
+      <SettingsScreen
+        user={{
+          id: user.id,
+          preferences: user.preferences,
+          createdAt: Date.now(),
+        }}
+        onSave={(prefs) => {
+          void handleUpdatePreferences(prefs);
+        }}
+        onClose={() => setOverlayScreen("tabs")}
+      />
+    );
   }
 
-  if (overlayScreen === 'results') {
+  if (overlayScreen === "camera") {
+    return (
+      <CameraScreen
+        onCapture={handleCapture}
+        onClose={() => setOverlayScreen("tabs")}
+      />
+    );
+  }
+
+  if (overlayScreen === "results") {
     return isAnalyzing ? (
       <View style={styles.analyzingContainer}>
         <LeafParticles count={10} />
         <View style={styles.analyzingCard}>
           <ActivityIndicator size="large" color={colors.primary[500]} />
           <Text style={styles.analyzingTitle}>Analyzing your meal...</Text>
-          <Text style={styles.analyzingSubtitle}>Identifying foods and calculating nutrition</Text>
+          <Text style={styles.analyzingSubtitle}>
+            Identifying foods and calculating nutrition
+          </Text>
         </View>
       </View>
     ) : scanResult && capturedImage ? (
@@ -472,8 +637,8 @@ export default function App() {
         result={scanResult}
         imageUri={capturedImage}
         onSave={handleSaveScan}
-        onRescan={() => setOverlayScreen('camera')}
-        onClose={() => setOverlayScreen('tabs')}
+        onRescan={() => setOverlayScreen("camera")}
+        onClose={() => setOverlayScreen("tabs")}
         remainingMacros={remainingMacros}
       />
     ) : (
@@ -488,7 +653,7 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.contentArea}>
-        {activeTab === 'home' && (
+        {activeTab === "home" && (
           <HomeScreen
             todayTotals={dayTotals}
             macroTargets={macroTargets}
@@ -501,21 +666,23 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'progress' && <ProgressScreen weekData={weeklySummary} />}
+        {activeTab === "progress" && (
+          <ProgressScreen weekData={weeklySummary} />
+        )}
 
-        {activeTab === 'history' && (
+        {activeTab === "history" && (
           <HistoryPlaceholder
             recentMeals={recentMeals}
-            onManualEntry={() => setOverlayScreen('manual')}
+            onManualEntry={() => setOverlayScreen("manual")}
           />
         )}
 
-        {activeTab === 'profile' && (
+        {activeTab === "profile" && (
           <ProfilePlaceholder
             user={user}
             authUser={authUser}
             apiHealthy={apiHealthy}
-            onOpenSettings={() => setOverlayScreen('settings')}
+            onOpenSettings={() => setOverlayScreen("settings")}
             onSignOut={handleSignOut}
           />
         )}
@@ -524,11 +691,22 @@ export default function App() {
       <TabBar
         activeTab={activeTab}
         onTabPress={setActiveTab}
-        onScanPress={() => setOverlayScreen('camera')}
+        onScanPress={() => setOverlayScreen("camera")}
       />
     </SafeAreaView>
   );
 }
+
+// ---- Wrap with ConvexProvider ----
+export default function App() {
+  return (
+    <ConvexProvider client={convex}>
+      <AppInner />
+    </ConvexProvider>
+  );
+}
+
+// ---- Placeholder Components ----
 
 const HistoryPlaceholder: React.FC<{
   recentMeals: RecentMeal[];
@@ -537,7 +715,9 @@ const HistoryPlaceholder: React.FC<{
   return (
     <View style={styles.placeholderScreen}>
       <Text style={styles.placeholderTitle}>History</Text>
-      <Text style={styles.placeholderSubtitle}>Detailed history view coming soon.</Text>
+      <Text style={styles.placeholderSubtitle}>
+        Detailed history view coming soon.
+      </Text>
 
       <View style={[styles.placeholderCard, shadows.sm]}>
         <Text style={styles.placeholderCardTitle}>Recent Entries</Text>
@@ -552,7 +732,7 @@ const HistoryPlaceholder: React.FC<{
 };
 
 const ProfilePlaceholder: React.FC<{
-  user: User | null;
+  user: UserData | null;
   authUser: AuthUser | null;
   apiHealthy: boolean;
   onOpenSettings: () => void;
@@ -565,18 +745,27 @@ const ProfilePlaceholder: React.FC<{
 
       <View style={[styles.placeholderCard, shadows.sm]}>
         <Text style={styles.placeholderCardTitle}>Name</Text>
-        <Text style={styles.placeholderCardValue}>{authUser?.displayName ?? 'Unknown'}</Text>
+        <Text style={styles.placeholderCardValue}>
+          {authUser?.displayName ?? "Unknown"}
+        </Text>
       </View>
 
       <View style={[styles.placeholderCard, shadows.sm]}>
         <Text style={styles.placeholderCardTitle}>Email</Text>
-        <Text style={styles.placeholderCardValue}>{authUser?.email ?? 'Unknown'}</Text>
+        <Text style={styles.placeholderCardValue}>
+          {authUser?.email ?? "Unknown"}
+        </Text>
       </View>
 
       <View style={[styles.placeholderCard, shadows.sm]}>
         <Text style={styles.placeholderCardTitle}>API Status</Text>
-        <Text style={[styles.placeholderCardValue, apiHealthy ? styles.goodStatus : styles.badStatus]}>
-          {apiHealthy ? 'Online' : 'Offline'}
+        <Text
+          style={[
+            styles.placeholderCardValue,
+            apiHealthy ? styles.goodStatus : styles.badStatus,
+          ]}
+        >
+          {apiHealthy ? "Online" : "Offline"}
         </Text>
       </View>
 
@@ -597,10 +786,10 @@ const TabBar: React.FC<{
   onScanPress: () => void;
 }> = ({ activeTab, onTabPress, onScanPress }) => {
   const items: Array<{ key: TabKey; label: string; icon: string }> = [
-    { key: 'home', label: 'Home', icon: '🏠' },
-    { key: 'progress', label: 'Progress', icon: '📈' },
-    { key: 'history', label: 'History', icon: '🧾' },
-    { key: 'profile', label: 'Profile', icon: '👤' },
+    { key: "home", label: "Home", icon: "🏠" },
+    { key: "progress", label: "Progress", icon: "📈" },
+    { key: "history", label: "History", icon: "🧾" },
+    { key: "profile", label: "Profile", icon: "👤" },
   ];
 
   return (
@@ -608,9 +797,18 @@ const TabBar: React.FC<{
       <View style={[styles.tabBar, shadows.lg]}>
         <View style={styles.tabGroup}>
           {items.slice(0, 2).map((item) => (
-            <Pressable key={item.key} style={styles.tabButton} onPress={() => onTabPress(item.key)}>
+            <Pressable
+              key={item.key}
+              style={styles.tabButton}
+              onPress={() => onTabPress(item.key)}
+            >
               <Text style={styles.tabIcon}>{item.icon}</Text>
-              <Text style={[styles.tabLabel, activeTab === item.key && styles.tabLabelActive]}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  activeTab === item.key && styles.tabLabelActive,
+                ]}
+              >
                 {item.label}
               </Text>
             </Pressable>
@@ -621,9 +819,18 @@ const TabBar: React.FC<{
 
         <View style={styles.tabGroup}>
           {items.slice(2).map((item) => (
-            <Pressable key={item.key} style={styles.tabButton} onPress={() => onTabPress(item.key)}>
+            <Pressable
+              key={item.key}
+              style={styles.tabButton}
+              onPress={() => onTabPress(item.key)}
+            >
               <Text style={styles.tabIcon}>{item.icon}</Text>
-              <Text style={[styles.tabLabel, activeTab === item.key && styles.tabLabelActive]}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  activeTab === item.key && styles.tabLabelActive,
+                ]}
+              >
                 {item.label}
               </Text>
             </Pressable>
@@ -631,7 +838,10 @@ const TabBar: React.FC<{
         </View>
       </View>
 
-      <Pressable style={[styles.scanFab, shadows.lg]} onPress={onScanPress}>
+      <Pressable
+        style={[styles.scanFab, shadows.lg]}
+        onPress={onScanPress}
+      >
         <Text style={styles.scanFabIcon}>＋</Text>
         <Text style={styles.scanFabText}>Scan</Text>
       </Pressable>
@@ -649,8 +859,8 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: colors.background.secondary,
   },
   loadingText: {
@@ -660,15 +870,15 @@ const styles = StyleSheet.create({
   },
   analyzingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: colors.background.secondary,
   },
   analyzingCard: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.xl,
     padding: spacing.xxl,
-    alignItems: 'center',
+    alignItems: "center",
     ...shadows.lg,
   },
   analyzingTitle: {
@@ -681,10 +891,10 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSizes.sm,
     color: colors.text.secondary,
     marginTop: spacing.sm,
-    textAlign: 'center',
+    textAlign: "center",
   },
   tabBarWrap: {
-    position: 'relative',
+    position: "relative",
   },
   tabBar: {
     minHeight: 74,
@@ -694,21 +904,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
     paddingTop: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   tabGroup: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
   },
   centerGap: {
     width: 76,
   },
   tabButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     minWidth: 56,
   },
   tabIcon: {
@@ -724,15 +934,15 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeights.semibold,
   },
   scanFab: {
-    position: 'absolute',
-    alignSelf: 'center',
+    position: "absolute",
+    alignSelf: "center",
     top: -20,
     width: 74,
     height: 74,
     borderRadius: borderRadius.full,
     backgroundColor: colors.primary[500],
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 4,
     borderColor: colors.background.secondary,
   },
@@ -792,7 +1002,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.secondary[400],
     borderRadius: borderRadius.full,
     paddingVertical: spacing.sm,
-    alignItems: 'center',
+    alignItems: "center",
   },
   manualEntryText: {
     color: colors.text.primary,
@@ -803,7 +1013,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[500],
     borderRadius: borderRadius.full,
     paddingVertical: spacing.sm,
-    alignItems: 'center',
+    alignItems: "center",
   },
   settingsOpenText: {
     color: colors.text.inverse,
@@ -814,7 +1024,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error,
     borderRadius: borderRadius.full,
     paddingVertical: spacing.sm,
-    alignItems: 'center',
+    alignItems: "center",
   },
   signOutText: {
     color: colors.text.inverse,

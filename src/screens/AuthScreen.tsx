@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,59 +10,70 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { borderRadius, colors, shadows, spacing, typography } from '../theme';
-import type { AuthUser } from '../services/auth';
-import { resetPassword } from '../services/auth';
+} from "react-native";
+import { borderRadius, colors, shadows, spacing, typography } from "../theme";
+import type { AuthUser } from "../services/auth";
 
 interface AuthScreenProps {
   onAuthenticated: (user: AuthUser, isNewUser: boolean) => void;
   onSignIn: (email: string, password: string) => Promise<AuthUser>;
-  onSignUp: (email: string, password: string, displayName: string) => Promise<AuthUser>;
+  onSignUp: (
+    email: string,
+    password: string,
+    displayName: string
+  ) => Promise<{ user: AuthUser; verificationCode: string }>;
+  onVerifyEmail: (email: string, code: string) => Promise<void>;
+  onResendCode: (email: string) => Promise<string>;
 }
 
-type Mode = 'login' | 'signup';
+type Mode = "login" | "signup";
 
 export default function AuthScreen({
   onAuthenticated,
   onSignIn,
   onSignUp,
+  onVerifyEmail,
+  onResendCode,
 }: AuthScreenProps) {
-  const [mode, setMode] = useState<Mode>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [mode, setMode] = useState<Mode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Verification state
   const [showVerifyScreen, setShowVerifyScreen] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [pendingVerificationCode, setPendingVerificationCode] = useState("");
 
   const validate = (): boolean => {
     setError(null);
 
     if (!email.trim()) {
-      setError('Email is required');
+      setError("Email is required");
       return false;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
-      setError('Please enter a valid email');
+      setError("Please enter a valid email");
       return false;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError("Password must be at least 6 characters");
       return false;
     }
 
-    if (mode === 'signup') {
+    if (mode === "signup") {
       if (!displayName.trim()) {
-        setError('Display name is required');
+        setError("Display name is required");
         return false;
       }
       if (password !== confirmPassword) {
-        setError('Passwords do not match');
+        setError("Passwords do not match");
         return false;
       }
     }
@@ -77,87 +88,180 @@ export default function AuthScreen({
     setError(null);
 
     try {
-      if (mode === 'login') {
+      if (mode === "login") {
         const user = await onSignIn(email.trim(), password);
         onAuthenticated(user, false);
       } else {
-        await onSignUp(email.trim(), password, displayName.trim());
-        // Don't auto-login — show verification screen
+        const result = await onSignUp(
+          email.trim(),
+          password,
+          displayName.trim()
+        );
+        setPendingVerificationCode(result.verificationCode);
         setShowVerifyScreen(true);
-        return;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Authentication failed';
+      const message =
+        err instanceof Error ? err.message : "Authentication failed";
       setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleMode = () => {
-    setMode(mode === 'login' ? 'signup' : 'login');
+  const handleVerify = async () => {
+    if (!verificationCode.trim()) {
+      setError("Enter the verification code");
+      return;
+    }
+
+    setLoading(true);
     setError(null);
-    setConfirmPassword('');
+
+    try {
+      await onVerifyEmail(email.trim(), verificationCode.trim());
+      Alert.alert("Email Verified!", "You can now sign in.", [
+        {
+          text: "Sign In",
+          onPress: () => {
+            setShowVerifyScreen(false);
+            setMode("login");
+            setPassword("");
+            setVerificationCode("");
+            setError(null);
+          },
+        },
+      ]);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Verification failed";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setLoading(true);
+    try {
+      const code = await onResendCode(email.trim());
+      setPendingVerificationCode(code);
+      Alert.alert("Code Resent", "A new verification code has been generated.");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to resend code";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setError('Enter your email above first');
+      setError("Enter your email above first");
       return;
     }
-    try {
-      setLoading(true);
-      await resetPassword(trimmedEmail);
-      Alert.alert('Check your email', 'A password reset link has been sent to ' + trimmedEmail);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send reset email';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
+    Alert.alert(
+      "Password Reset",
+      "Password reset is not yet available. Please contact support."
+    );
   };
 
+  const toggleMode = () => {
+    setMode(mode === "login" ? "signup" : "login");
+    setError(null);
+    setConfirmPassword("");
+  };
+
+  // ---- VERIFICATION SCREEN ----
   if (showVerifyScreen) {
     return (
       <View style={styles.container}>
         <View style={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.logo}>📧</Text>
-            <Text style={styles.appName}>Check Your Email</Text>
+            <Text style={styles.appName}>Verify Your Email</Text>
             <Text style={styles.tagline}>
-              We sent a verification link to
+              Enter the 6-digit code to verify your account
             </Text>
-            <Text style={styles.verifyEmail}>{email.trim().toLowerCase()}</Text>
+            <Text style={styles.verifyEmail}>
+              {email.trim().toLowerCase()}
+            </Text>
           </View>
 
-          <View style={styles.verifyCard}>
-            <Text style={styles.verifyStep}>1. Open your email inbox</Text>
-            <Text style={styles.verifyStep}>2. Find the email from BiteScan</Text>
-            <Text style={styles.verifyStep}>3. Click the confirmation link</Text>
-            <Text style={styles.verifyStep}>4. Come back here and sign in</Text>
+          {/* In production, remove this — code would be emailed */}
+          <View style={styles.codePreview}>
+            <Text style={styles.codePreviewLabel}>
+              Your verification code (dev mode):
+            </Text>
+            <Text style={styles.codePreviewValue}>
+              {pendingVerificationCode}
+            </Text>
           </View>
+
+          <View style={[styles.card, shadows.md]}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Verification Code</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                value={verificationCode}
+                onChangeText={setVerificationCode}
+                placeholder="123456"
+                placeholderTextColor={colors.text.tertiary}
+                keyboardType="number-pad"
+                maxLength={6}
+                textAlign="center"
+              />
+            </View>
+
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
+            <Pressable
+              style={[
+                styles.submitButton,
+                loading && styles.submitButtonDisabled,
+              ]}
+              onPress={handleVerify}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.text.inverse} />
+              ) : (
+                <Text style={styles.submitText}>Verify Email</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.toggleButton} onPress={handleResendCode}>
+            <Text style={styles.toggleText}>Resend Code</Text>
+          </Pressable>
 
           <Pressable
-            style={styles.submitButton}
+            style={styles.toggleButton}
             onPress={() => {
               setShowVerifyScreen(false);
-              setMode('login');
-              setPassword('');
+              setMode("login");
+              setPassword("");
               setError(null);
             }}
           >
-            <Text style={styles.submitText}>Back to Sign In</Text>
+            <Text style={styles.toggleText}>Back to Sign In</Text>
           </Pressable>
         </View>
       </View>
     );
   }
 
+  // ---- LOGIN / SIGNUP SCREEN ----
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -167,12 +271,12 @@ export default function AuthScreen({
           <Text style={styles.logo}>🍃</Text>
           <Text style={styles.appName}>BiteScan</Text>
           <Text style={styles.tagline}>
-            {mode === 'login' ? 'Welcome back' : 'Create your account'}
+            {mode === "login" ? "Welcome back" : "Create your account"}
           </Text>
         </View>
 
         <View style={[styles.card, shadows.md]}>
-          {mode === 'signup' && (
+          {mode === "signup" && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Display Name</Text>
               <TextInput
@@ -211,11 +315,13 @@ export default function AuthScreen({
               placeholder="At least 6 characters"
               placeholderTextColor={colors.text.tertiary}
               secureTextEntry
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              autoComplete={
+                mode === "login" ? "current-password" : "new-password"
+              }
             />
           </View>
 
-          {mode === 'signup' && (
+          {mode === "signup" && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Confirm Password</Text>
               <TextInput
@@ -237,7 +343,10 @@ export default function AuthScreen({
           )}
 
           <Pressable
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            style={[
+              styles.submitButton,
+              loading && styles.submitButtonDisabled,
+            ]}
             onPress={handleSubmit}
             disabled={loading}
           >
@@ -245,31 +354,34 @@ export default function AuthScreen({
               <ActivityIndicator color={colors.text.inverse} />
             ) : (
               <Text style={styles.submitText}>
-                {mode === 'login' ? 'Sign In' : 'Create Account'}
+                {mode === "login" ? "Sign In" : "Create Account"}
               </Text>
             )}
           </Pressable>
 
-          {mode === 'login' && (
-            <Pressable style={styles.forgotButton} onPress={handleForgotPassword}>
+          {mode === "login" && (
+            <Pressable
+              style={styles.forgotButton}
+              onPress={handleForgotPassword}
+            >
               <Text style={styles.forgotText}>Forgot password?</Text>
             </Pressable>
           )}
         </View>
 
-        {mode === 'signup' && (
+        {mode === "signup" && (
           <View style={styles.verificationNote}>
             <Text style={styles.verificationNoteText}>
-              📧 You'll receive a verification email after signing up
+              📧 You'll receive a verification code after signing up
             </Text>
           </View>
         )}
 
         <Pressable style={styles.toggleButton} onPress={toggleMode}>
           <Text style={styles.toggleText}>
-            {mode === 'login'
+            {mode === "login"
               ? "Don't have an account? Sign Up"
-              : 'Already have an account? Sign In'}
+              : "Already have an account? Sign In"}
           </Text>
         </Pressable>
       </ScrollView>
@@ -284,12 +396,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xxl,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: spacing.xl,
   },
   logo: {
@@ -332,24 +444,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.neutral[200],
   },
+  codeInput: {
+    fontSize: typography.fontSizes.xl,
+    letterSpacing: 8,
+    fontWeight: typography.fontWeights.bold,
+  },
   errorBox: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: "#fef2f2",
     borderRadius: borderRadius.md,
     padding: spacing.sm,
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: '#fecaca',
+    borderColor: "#fecaca",
   },
   errorText: {
     color: colors.error,
     fontSize: typography.fontSizes.sm,
-    textAlign: 'center',
+    textAlign: "center",
   },
   submitButton: {
     backgroundColor: colors.primary[500],
     borderRadius: borderRadius.full,
     paddingVertical: spacing.md,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: spacing.sm,
   },
   submitButtonDisabled: {
@@ -362,7 +479,7 @@ const styles = StyleSheet.create({
   },
   forgotButton: {
     marginTop: spacing.md,
-    alignItems: 'center',
+    alignItems: "center",
   },
   forgotText: {
     color: colors.primary[500],
@@ -370,16 +487,16 @@ const styles = StyleSheet.create({
   },
   verificationNote: {
     marginTop: spacing.md,
-    backgroundColor: colors.primary[50] ?? '#f0fdf4',
+    backgroundColor: colors.primary[50] ?? "#f0fdf4",
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.primary[200] ?? '#bbf7d0',
+    borderColor: colors.primary[200] ?? "#bbf7d0",
   },
   verificationNoteText: {
     fontSize: typography.fontSizes.sm,
-    color: colors.primary[700] ?? '#15803d',
-    textAlign: 'center',
+    color: colors.primary[700] ?? "#15803d",
+    textAlign: "center",
   },
   verifyEmail: {
     fontSize: typography.fontSizes.md,
@@ -387,24 +504,29 @@ const styles = StyleSheet.create({
     color: colors.primary[600],
     marginTop: spacing.xs,
   },
-  verifyCard: {
-    backgroundColor: colors.background.card,
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
+  codePreview: {
+    backgroundColor: "#fef9c3",
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: colors.neutral[200],
-    marginBottom: spacing.lg,
+    borderColor: "#fde047",
+    alignItems: "center",
   },
-  verifyStep: {
-    fontSize: typography.fontSizes.md,
-    color: colors.text.primary,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.neutral[100] ?? '#f5f5f5',
+  codePreviewLabel: {
+    fontSize: typography.fontSizes.xs,
+    color: "#854d0e",
+    marginBottom: spacing.xs,
+  },
+  codePreviewValue: {
+    fontSize: typography.fontSizes.xxl,
+    fontWeight: typography.fontWeights.bold,
+    color: "#854d0e",
+    letterSpacing: 4,
   },
   toggleButton: {
     marginTop: spacing.lg,
-    alignItems: 'center',
+    alignItems: "center",
   },
   toggleText: {
     color: colors.primary[500],
