@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "BiteScan",
+    "slug": "bitescan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f0fdf4"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bitescan.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#22c55e"
+      },
+      "package": "com.bitescan.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiBaseUrl": "http://10.0.0.226:8420",
+      "requestTimeoutMs": 45000
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BiteScan needs camera access to scan your food"
+        }
+      ],
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
+  }
+}
