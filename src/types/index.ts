@@ -32,6 +32,8 @@ export interface UserPreferences {
   priorities: Partial<Record<DietaryGoal, number>>; // 0-100 priority weight
   macroTargets?: MacroTargets;
   tasteProfile?: TasteProfile;
+  useMetric?: boolean;
+  darkMode?: boolean;
 }
 
 export interface NutritionInfo {

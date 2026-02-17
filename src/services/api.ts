@@ -9,9 +9,12 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
   requestTimeoutMs?: number;
 };
 
-const API_BASE_URL = extra.apiBaseUrl || 'https://bitescan-api.sharkmastertest.cfd';
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  extra.apiBaseUrl ||
+  'https://bitescan-api.sharkmastertest.cfd';
 const REQUEST_TIMEOUT_MS = extra.requestTimeoutMs ?? 45_000;
-const API_TOKEN = extra.apiToken;
+const API_TOKEN = process.env.EXPO_PUBLIC_API_TOKEN || extra.apiToken;
 
 function withTimeout<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();

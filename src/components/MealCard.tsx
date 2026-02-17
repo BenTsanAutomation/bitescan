@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { borderRadius, colors, shadows, spacing, typography } from '../theme';
 
 interface MealCardProps {
@@ -10,6 +10,7 @@ interface MealCardProps {
   carbs: number;
   fat: number;
   imageUri?: string;
+  onDelete?: () => void;
 }
 
 const formatTime = (timestamp: number): string => {
@@ -41,9 +42,18 @@ export const MealCard: React.FC<MealCardProps> = ({
   carbs,
   fat,
   imageUri,
+  onDelete,
 }) => {
+  const handleLongPress = () => {
+    if (!onDelete) return;
+    Alert.alert("Delete Meal", `Remove "${mealName}" from today's log?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: onDelete },
+    ]);
+  };
+
   return (
-    <View style={[styles.card, shadows.sm]}>
+    <Pressable onLongPress={handleLongPress} style={[styles.card, shadows.sm]}>
       <View style={styles.thumbnailWrap}>
         {imageUri ? (
           <Image source={{ uri: imageUri }} style={styles.thumbnail} resizeMode="cover" />
@@ -70,7 +80,7 @@ export const MealCard: React.FC<MealCardProps> = ({
           <MacroPill label="F" value={fat} color={colors.neutral[700]} />
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 };
 

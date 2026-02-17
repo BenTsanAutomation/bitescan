@@ -20,9 +20,12 @@ import {
   signUp,
   verifyEmail,
   resendVerificationEmail,
+  requestPasswordReset,
+  resetPassword,
   updatePreferencesRemote,
 } from "./src/services/auth";
 import { api } from "./convex/_generated/api";
+import { ErrorBoundary } from "./src/components/ErrorBoundary";
 import AuthScreen from "./src/screens/AuthScreen";
 import {
   DailyMacroSummary,
@@ -59,6 +62,7 @@ interface UserData {
   email: string;
   displayName: string;
   preferences: UserPreferences;
+  createdAt?: number;
 }
 
 const hasMacroTargets = (targets?: MacroTargets): boolean =>
@@ -277,6 +281,7 @@ function AppInner() {
           email: authUser!.email,
           displayName: authUser!.displayName,
           preferences: prefs,
+          createdAt: profile?._creationTime,
         };
 
         setUser(userData);
@@ -570,6 +575,8 @@ function AppInner() {
         onSignUp={signUp}
         onVerifyEmail={verifyEmail}
         onResendCode={resendVerificationEmail}
+        onRequestPasswordReset={requestPasswordReset}
+        onResetPassword={resetPassword}
       />
     );
   }
@@ -601,7 +608,7 @@ function AppInner() {
         user={{
           id: user.id,
           preferences: user.preferences,
-          createdAt: Date.now(),
+          createdAt: user.createdAt ?? Date.now(),
         }}
         onSave={(prefs) => {
           void handleUpdatePreferences(prefs);
@@ -663,6 +670,20 @@ function AppInner() {
             daysWithMeals={daysWithMeals}
             recentMeals={recentMeals}
             streak={streak}
+            onRefresh={async () => {
+              await loadDashboardData(selectedDate, user);
+            }}
+            onDeleteMeal={async (mealId: string) => {
+              try {
+                await convex.mutation(api.meals.deleteMealEntry, {
+                  id: mealId as any,
+                });
+                await loadDashboardData(selectedDate, user);
+              } catch (err) {
+                console.error("Delete meal error:", err);
+                Alert.alert("Error", "Failed to delete meal entry");
+              }
+            }}
           />
         )}
 
@@ -700,9 +721,11 @@ function AppInner() {
 // ---- Wrap with ConvexProvider ----
 export default function App() {
   return (
-    <ConvexProvider client={convex}>
-      <AppInner />
-    </ConvexProvider>
+    <ErrorBoundary>
+      <ConvexProvider client={convex}>
+        <AppInner />
+      </ConvexProvider>
+    </ErrorBoundary>
   );
 }
 

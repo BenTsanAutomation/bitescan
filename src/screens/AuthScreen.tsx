@@ -24,9 +24,11 @@ interface AuthScreenProps {
   ) => Promise<{ user: AuthUser; verificationCode: string }>;
   onVerifyEmail: (email: string, code: string) => Promise<void>;
   onResendCode: (email: string) => Promise<string>;
+  onRequestPasswordReset?: (email: string) => Promise<{ sent: boolean; code?: string }>;
+  onResetPassword?: (email: string, code: string, newPassword: string) => Promise<void>;
 }
 
-type Mode = "login" | "signup";
+type Mode = "login" | "signup" | "forgot" | "reset";
 
 export default function AuthScreen({
   onAuthenticated,
@@ -34,6 +36,8 @@ export default function AuthScreen({
   onSignUp,
   onVerifyEmail,
   onResendCode,
+  onRequestPasswordReset,
+  onResetPassword,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -47,6 +51,9 @@ export default function AuthScreen({
   const [showVerifyScreen, setShowVerifyScreen] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
   const [pendingVerificationCode, setPendingVerificationCode] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
   const validate = (): boolean => {
     setError(null);
@@ -162,16 +169,67 @@ export default function AuthScreen({
       setError("Enter your email above first");
       return;
     }
-    Alert.alert(
-      "Password Reset",
-      "Password reset is not yet available. Please contact support."
-    );
+    if (!onRequestPasswordReset) {
+      Alert.alert("Password Reset", "Password reset is not yet available.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await onRequestPasswordReset(trimmedEmail);
+      setMode("reset");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send reset code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetCode.trim()) {
+      setError("Enter the reset code");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError("New password must be at least 6 characters");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+    if (!onResetPassword) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await onResetPassword(email.trim(), resetCode.trim(), newPassword);
+      Alert.alert("Password Reset", "Your password has been reset. You can now sign in.", [
+        {
+          text: "Sign In",
+          onPress: () => {
+            setMode("login");
+            setPassword("");
+            setResetCode("");
+            setNewPassword("");
+            setConfirmNewPassword("");
+            setError(null);
+          },
+        },
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset password");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleMode = () => {
     setMode(mode === "login" ? "signup" : "login");
     setError(null);
     setConfirmPassword("");
+    setResetCode("");
+    setNewPassword("");
+    setConfirmNewPassword("");
   };
 
   // ---- VERIFICATION SCREEN ----
@@ -288,6 +346,101 @@ export default function AuthScreen({
               setShowVerifyScreen(false);
               setMode("login");
               setPassword("");
+              setError(null);
+            }}
+          >
+            <Text style={styles.toggleText}>Back to Sign In</Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  // ---- PASSWORD RESET SCREEN ----
+  if (mode === "reset") {
+    return (
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.header}>
+            <Text style={styles.logo}>🔑</Text>
+            <Text style={styles.appName}>Reset Password</Text>
+            <Text style={styles.tagline}>
+              Enter the code sent to your email
+            </Text>
+            <Text style={styles.verifyEmail}>
+              {email.trim().toLowerCase()}
+            </Text>
+          </View>
+
+          <View style={[styles.card, shadows.md]}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Reset Code</Text>
+              <TextInput
+                style={styles.input}
+                value={resetCode}
+                onChangeText={(text) => setResetCode(text.replace(/[^0-9]/g, ""))}
+                placeholder="6-digit code"
+                placeholderTextColor={colors.text.tertiary}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>New Password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="At least 6 characters"
+                placeholderTextColor={colors.text.tertiary}
+                secureTextEntry
+                autoComplete="new-password"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Confirm New Password</Text>
+              <TextInput
+                style={styles.input}
+                value={confirmNewPassword}
+                onChangeText={setConfirmNewPassword}
+                placeholder="Repeat new password"
+                placeholderTextColor={colors.text.tertiary}
+                secureTextEntry
+                autoComplete="new-password"
+              />
+            </View>
+
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
+            <Pressable
+              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              onPress={handleResetPassword}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.text.inverse} />
+              ) : (
+                <Text style={styles.submitText}>Reset Password</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={styles.toggleButton}
+            onPress={() => {
+              setMode("login");
               setError(null);
             }}
           >

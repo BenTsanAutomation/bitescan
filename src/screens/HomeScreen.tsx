@@ -1,5 +1,5 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { borderRadius, colors, shadows, spacing, typography } from '../theme';
 import { MacroRemaining, MacroTargets, MacroTotals, RecentMeal, UserStreak } from '../types';
 import { CircularProgress } from '../components/CircularProgress';
@@ -15,6 +15,10 @@ interface HomeScreenProps {
   daysWithMeals: string[];
   recentMeals: RecentMeal[];
   streak: UserStreak | null;
+  isLoading?: boolean;
+  error?: string | null;
+  onRefresh?: () => Promise<void>;
+  onDeleteMeal?: (mealId: string) => Promise<void>;
 }
 
 const clampProgress = (current: number, target: number): number => {
@@ -43,7 +47,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   daysWithMeals,
   recentMeals,
   streak,
+  isLoading,
+  error,
+  onRefresh,
+  onDeleteMeal,
 }) => {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    if (!onRefresh) return;
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onRefresh]);
   const safeStreak = streak ?? noStreak;
   const caloriesRemaining = remainingMacros
     ? remainingMacros.calories
@@ -59,7 +78,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     : macroTargets.fat - todayTotals.fat;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary[500]]}
+            tintColor={colors.primary[500]}
+          />
+        ) : undefined
+      }
+    >
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Today</Text>
@@ -71,6 +103,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <Text style={styles.streakLabel}>day streak</Text>
         </View>
       </View>
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>⚠️ {error}</Text>
+        </View>
+      ) : null}
 
       <WeekCalendar
         selectedDate={selectedDate}
@@ -150,6 +188,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             carbs={meal.carbs}
             fat={meal.fat}
             imageUri={meal.imageUri}
+            onDelete={onDeleteMeal ? () => onDeleteMeal(meal.id) : undefined}
           />
         ))
       )}
@@ -269,6 +308,19 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: typography.fontSizes.sm,
     color: colors.text.secondary,
+  },
+  errorBanner: {
+    backgroundColor: '#fef2f2',
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: typography.fontSizes.sm,
+    textAlign: 'center',
   },
 });
 

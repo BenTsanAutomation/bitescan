@@ -3,11 +3,28 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
-// Simple SHA-256-like hash using Convex's built-in capabilities
-// In production, use a proper hashing library via an action
+// PBKDF2 with 100k iterations — resistant to brute-force
+const PBKDF2_ITERATIONS = 100_000;
+
 async function hashPassword(password: string, salt: string): Promise<string> {
-  const data = new TextEncoder().encode(salt + password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const hashBuffer = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: enc.encode(salt),
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256
+  );
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -313,6 +330,110 @@ export const signOut = mutation({
     if (session) {
       await ctx.db.delete(session._id);
     }
+  },
+});
+
+// ============================================================
+// REQUEST PASSWORD RESET
+// ============================================================
+
+export const requestPasswordReset = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const normalizedEmail = args.email.trim().toLowerCase();
+
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
+      .first();
+
+    // Don't reveal whether account exists
+    if (!profile) return { sent: true };
+
+    const code = generateVerificationCode();
+    await ctx.db.insert("emailVerifications", {
+      profileId: profile._id,
+      email: normalizedEmail,
+      code,
+      expiresAt: Date.now() + VERIFICATION_EXPIRY_MS,
+      used: false,
+    });
+
+    await ctx.scheduler.runAfter(0, internal.email.sendPasswordResetEmail, {
+      to: normalizedEmail,
+      displayName: profile.displayName,
+      code,
+    });
+
+    return { sent: true, code }; // code returned for dev; remove in production
+  },
+});
+
+// ============================================================
+// RESET PASSWORD
+// ============================================================
+
+export const resetPassword = mutation({
+  args: {
+    email: v.string(),
+    code: v.string(),
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (args.newPassword.length < 6) {
+      throw new Error("Password must be at least 6 characters");
+    }
+
+    const normalizedEmail = args.email.trim().toLowerCase();
+
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
+      .first();
+
+    if (!profile) throw new Error("No account found with this email");
+
+    const verification = await ctx.db
+      .query("emailVerifications")
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("code"), args.code),
+          q.eq(q.field("used"), false),
+          q.gt(q.field("expiresAt"), Date.now())
+        )
+      )
+      .first();
+
+    if (!verification) {
+      throw new Error("Invalid or expired reset code");
+    }
+
+    // Update password
+    const cred = await ctx.db
+      .query("authCredentials")
+      .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
+      .first();
+
+    if (!cred) throw new Error("Credentials not found");
+
+    const salt = generateSalt();
+    const passwordHash = await hashPassword(args.newPassword, salt);
+
+    await ctx.db.patch(cred._id, { passwordHash, salt });
+    await ctx.db.patch(verification._id, { used: true });
+
+    // Invalidate all existing sessions
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
+      .collect();
+
+    for (const session of sessions) {
+      await ctx.db.delete(session._id);
+    }
+
+    return { success: true };
   },
 });
 

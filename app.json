@@ -28,7 +28,6 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiBaseUrl": "http://10.0.0.226:8420",
       "requestTimeoutMs": 45000
     },
     "plugins": [
@@ -38,7 +37,7 @@
           "cameraPermission": "BiteScan needs camera access to scan your food"
         }
       ],
-      "expo-sqlite"
+      "expo-secure-store"
     ]
   }
 }

@@ -1,9 +1,37 @@
-// BiteScan Auth Service — Convex-backed with local session persistence
+// BiteScan Auth Service — Convex-backed with secure session persistence
+import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { convex } from "./convexClient";
 import { api } from "../../convex/_generated/api";
 
 const SESSION_TOKEN_KEY = "bitescan_session_token";
+
+// expo-secure-store is not available on web — fall back to AsyncStorage
+const isSecureStoreAvailable = Platform.OS !== "web";
+
+async function getToken(): Promise<string | null> {
+  if (isSecureStoreAvailable) {
+    return SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+  }
+  return AsyncStorage.getItem(SESSION_TOKEN_KEY);
+}
+
+async function setToken(token: string): Promise<void> {
+  if (isSecureStoreAvailable) {
+    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
+  } else {
+    await AsyncStorage.setItem(SESSION_TOKEN_KEY, token);
+  }
+}
+
+async function deleteToken(): Promise<void> {
+  if (isSecureStoreAvailable) {
+    await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
+  } else {
+    await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+  }
+}
 
 export interface AuthUser {
   id: string;
@@ -57,8 +85,8 @@ export async function signIn(
 ): Promise<AuthUser> {
   const result = await convex.mutation(api.auth.signIn, { email, password });
 
-  // Store session token
-  await AsyncStorage.setItem(SESSION_TOKEN_KEY, result.token);
+  // Store session token securely
+  await setToken(result.token);
 
   return result.user;
 }
@@ -67,7 +95,7 @@ export async function signIn(
  * Sign out and clear session.
  */
 export async function signOut(): Promise<void> {
-  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
+  const token = await getToken();
   if (token) {
     try {
       await convex.mutation(api.auth.signOut, { token });
@@ -75,25 +103,25 @@ export async function signOut(): Promise<void> {
       // Ignore errors during sign out
     }
   }
-  await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+  await deleteToken();
 }
 
 /**
  * Get stored session from AsyncStorage and validate with Convex.
  */
 export async function getStoredSession(): Promise<AuthUser | null> {
-  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
+  const token = await getToken();
   if (!token) return null;
 
   try {
     const user = await convex.query(api.auth.validateSession, { token });
     if (!user) {
-      await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+      await deleteToken();
       return null;
     }
     return user;
   } catch {
-    await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
+    await deleteToken();
     return null;
   }
 }
@@ -106,6 +134,28 @@ export async function resendVerificationEmail(
 ): Promise<string> {
   const result = await convex.mutation(api.auth.resendVerification, { email });
   return result.verificationCode;
+}
+
+/**
+ * Request a password reset code via email.
+ */
+export async function requestPasswordReset(
+  email: string
+): Promise<{ sent: boolean; code?: string }> {
+  return await convex.mutation(api.auth.requestPasswordReset, { email });
+}
+
+/**
+ * Reset password using the emailed code.
+ */
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<void> {
+  await convex.mutation(api.auth.resetPassword, { email, code, newPassword });
+  // Clear any stored session since all sessions are invalidated
+  await deleteToken();
 }
 
 /**

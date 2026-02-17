@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -18,9 +19,19 @@ interface SettingsScreenProps {
   user: User;
   onSave: (prefs: UserPreferences) => void;
   onClose: () => void;
+  onClearTodayData?: () => Promise<void>;
+  onExportData?: () => Promise<void>;
+  onResetSettings?: () => Promise<void>;
 }
 
-export const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onSave, onClose }) => {
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({
+  user,
+  onSave,
+  onClose,
+  onClearTodayData,
+  onExportData,
+  onResetSettings,
+}) => {
   const [goals, setGoals] = useState<DietaryGoal[]>(user.preferences.goals || []);
   const [priorities, setPriorities] = useState<Partial<Record<DietaryGoal, number>>>(
     user.preferences.priorities || {}
@@ -28,8 +39,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onSave, on
   const [macroTargets, setMacroTargets] = useState<MacroTargets>(
     user.preferences.macroTargets || { calories: 2000, protein: 150, carbs: 200, fat: 65 }
   );
-  const [useMetric, setUseMetric] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [useMetric, setUseMetric] = useState(user.preferences.useMetric ?? false);
+  const [darkMode, setDarkMode] = useState(user.preferences.darkMode ?? false);
 
   const handleSave = () => {
     const updatedPrefs: UserPreferences = {
@@ -37,6 +48,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onSave, on
       priorities,
       macroTargets,
       tasteProfile: user.preferences.tasteProfile,
+      useMetric,
+      darkMode,
     };
     onSave(updatedPrefs);
     onClose();
@@ -179,21 +192,56 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onSave, on
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App</Text>
           <View style={styles.card}>
-            <Pressable style={styles.actionRow}>
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => {
+                Alert.alert(
+                  "Clear Today's Data",
+                  "This will delete all meals logged today. Are you sure?",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Clear",
+                      style: "destructive",
+                      onPress: () => onClearTodayData?.() ?? Alert.alert("Not Available", "This feature is not yet connected."),
+                    },
+                  ]
+                );
+              }}
+            >
               <Text style={styles.actionLabel}>Clear Today's Data</Text>
               <Text style={styles.actionIcon}>→</Text>
             </Pressable>
 
             <View style={styles.divider} />
 
-            <Pressable style={styles.actionRow}>
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => onExportData?.() ?? Alert.alert("Coming Soon", "Data export is not yet available.")}
+            >
               <Text style={styles.actionLabel}>Export All Data</Text>
               <Text style={styles.actionIcon}>→</Text>
             </Pressable>
 
             <View style={styles.divider} />
 
-            <Pressable style={styles.actionRow}>
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => {
+                Alert.alert(
+                  "Reset All Settings",
+                  "This will reset your dietary goals and macro targets to defaults. Are you sure?",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Reset",
+                      style: "destructive",
+                      onPress: () => onResetSettings?.() ?? Alert.alert("Not Available", "This feature is not yet connected."),
+                    },
+                  ]
+                );
+              }}
+            >
               <Text style={[styles.actionLabel, styles.dangerText]}>Reset All Settings</Text>
               <Text style={styles.actionIcon}>→</Text>
             </Pressable>
@@ -350,7 +398,7 @@ const styles = StyleSheet.create({
     color: colors.text.tertiary,
   },
   dangerText: {
-    color: colors.error[500],
+    color: colors.error,
   },
   footer: {
     alignItems: 'center',
