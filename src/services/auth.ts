@@ -169,11 +169,12 @@ export async function getSessionToken(): Promise<string | null> {
  * Update user preferences in Convex.
  */
 export async function updatePreferencesRemote(
-  externalUserId: string,
   preferencesJson: string
 ): Promise<void> {
+  const token = await getToken();
+  if (!token) throw new Error("Not authenticated");
   await convex.mutation(api.auth.updatePreferences, {
-    externalUserId,
+    token,
     preferencesJson,
   });
 }

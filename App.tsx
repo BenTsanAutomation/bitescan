@@ -260,9 +260,10 @@ function AppInner() {
         setApiHealthy(healthy);
         if (!healthy) console.warn("BiteScan API not available");
 
-        // Get profile from Convex
+        // Get profile from Convex (authenticated)
+        const tkn = await getToken();
         const profile = await convex.query(api.auth.getProfile, {
-          externalUserId: authUser!.id,
+          token: tkn,
         });
 
         let prefs: UserPreferences = { goals: [], priorities: {} };
@@ -341,7 +342,6 @@ function AppInner() {
     async (prefs: UserPreferences) => {
       // Sync to Convex
       updatePreferencesRemote(
-        currentUserId,
         JSON.stringify(prefs)
       ).catch((e) => console.error("Cloud sync failed:", e));
 

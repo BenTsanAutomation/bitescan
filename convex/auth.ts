@@ -2,6 +2,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { requireAuth } from "./authMiddleware";
 
 // PBKDF2 with 100k iterations — resistant to brute-force
 const PBKDF2_ITERATIONS = 100_000;
@@ -63,6 +64,8 @@ const RATE_LIMITS: Record<string, number> = {
   signup: 5,
   reset: 5,
   resend: 3,
+  verify: 10,       // code entry attempts
+  resetpw: 10,      // password reset code attempts
 };
 
 async function checkRateLimit(
@@ -174,7 +177,8 @@ export const signUp = mutation({
       externalId,
       email: normalizedEmail,
       displayName: args.displayName.trim(),
-      verificationCode: code,
+      // Only return code in dev for the on-screen display
+      verificationCode: process.env.CONVEX_IS_DEV === "true" ? code : "",
       emailVerified: false,
     };
   },
@@ -251,6 +255,7 @@ export const verifyEmail = mutation({
   },
   handler: async (ctx, args) => {
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "verify", normalizedEmail);
 
     // Find the profile by email
     const profile = await ctx.db
@@ -326,7 +331,9 @@ export const resendVerification = mutation({
       code,
     });
 
-    return { verificationCode: code };
+    return {
+      verificationCode: process.env.CONVEX_IS_DEV === "true" ? code : "",
+    };
   },
 });
 
@@ -429,6 +436,7 @@ export const resetPassword = mutation({
     }
 
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "resetpw", normalizedEmail);
 
     const profile = await ctx.db
       .query("profiles")
@@ -486,11 +494,13 @@ export const resetPassword = mutation({
 // ============================================================
 
 export const getProfile = query({
-  args: { externalUserId: v.string() },
+  args: { token: v.string() },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     return await ctx.db
       .query("profiles")
-      .withIndex("by_externalId", (q) => q.eq("externalId", args.externalUserId))
+      .withIndex("by_externalId", (q) => q.eq("externalId", externalUserId))
       .first();
   },
 });
@@ -501,14 +511,16 @@ export const getProfile = query({
 
 export const updatePreferences = mutation({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     preferencesJson: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const profile = await ctx.db
       .query("profiles")
       .withIndex("by_externalId", (q) =>
-        q.eq("externalId", args.externalUserId)
+        q.eq("externalId", externalUserId)
       )
       .first();
 
