@@ -1,5 +1,5 @@
 // Results Screen - Card Stack with Dashboard Toggle
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -10,13 +10,14 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
-import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import { spacing, borderRadius, typography, shadows, ThemeColors } from '../theme';
 import { ScanResult, FoodItem, MealRecommendation, MacroRemaining } from '../types';
 import { GradeDisplay } from '../components/GradeDisplay';
 import { FoodCard } from '../components/FoodCard';
 import { LeafParticles } from '../animations/LeafParticles';
 import MacroFitCard from '../components/MacroFitCard';
 import { calculateMacroFit } from '../utils/macroCalculations';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -96,6 +97,8 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
   onClose,
   remainingMacros,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
@@ -239,6 +242,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
 
 // Dashboard View Component
 const DashboardView: React.FC<{ foods: FoodItem[] }> = ({ foods }) => {
+  const { colors } = useThemeContext();
+  const dStyles = useMemo(() => createDashStyles(colors), [colors]);
+
   const totals = foods.reduce(
     (acc, food) => ({
       calories: acc.calories + food.nutrition.calories,
@@ -256,25 +262,25 @@ const DashboardView: React.FC<{ foods: FoodItem[] }> = ({ foods }) => {
   const fatPct = macroTotal > 0 ? (totals.fat / macroTotal) * 100 : 0;
 
   return (
-    <View style={dashStyles.container}>
+    <View style={dStyles.container}>
       {/* Macro Distribution */}
-      <View style={[dashStyles.card, shadows.md]}>
-        <Text style={dashStyles.cardTitle}>Macro Distribution</Text>
-        <View style={dashStyles.macroBar}>
-          <View style={[dashStyles.macroSegment, { 
+      <View style={[dStyles.card, shadows.md]}>
+        <Text style={dStyles.cardTitle}>Macro Distribution</Text>
+        <View style={dStyles.macroBar}>
+          <View style={[dStyles.macroSegment, { 
             flex: proteinPct, 
             backgroundColor: colors.primary[500] 
           }]} />
-          <View style={[dashStyles.macroSegment, { 
+          <View style={[dStyles.macroSegment, { 
             flex: carbsPct, 
             backgroundColor: colors.secondary[400] 
           }]} />
-          <View style={[dashStyles.macroSegment, { 
+          <View style={[dStyles.macroSegment, { 
             flex: fatPct, 
             backgroundColor: colors.neutral[400] 
           }]} />
         </View>
-        <View style={dashStyles.macroLegend}>
+        <View style={dStyles.macroLegend}>
           <LegendItem color={colors.primary[500]} label="Protein" value={`${totals.protein.toFixed(1)}g`} />
           <LegendItem color={colors.secondary[400]} label="Carbs" value={`${totals.carbs.toFixed(1)}g`} />
           <LegendItem color={colors.neutral[400]} label="Fat" value={`${totals.fat.toFixed(1)}g`} />
@@ -282,7 +288,7 @@ const DashboardView: React.FC<{ foods: FoodItem[] }> = ({ foods }) => {
       </View>
 
       {/* Nutrients Grid */}
-      <View style={dashStyles.grid}>
+      <View style={dStyles.grid}>
         <NutrientCard 
           emoji="🔥" 
           label="Calories" 
@@ -298,17 +304,17 @@ const DashboardView: React.FC<{ foods: FoodItem[] }> = ({ foods }) => {
       </View>
 
       {/* Items Summary */}
-      <View style={[dashStyles.card, shadows.md]}>
-        <Text style={dashStyles.cardTitle}>Items Breakdown</Text>
-        {foods.map((food, index) => (
-          <View key={food.id} style={dashStyles.itemRow}>
-            <View style={dashStyles.itemInfo}>
-              <Text style={dashStyles.itemName}>{food.name}</Text>
-              <Text style={dashStyles.itemPortion}>{food.portion}</Text>
+      <View style={[dStyles.card, shadows.md]}>
+        <Text style={dStyles.cardTitle}>Items Breakdown</Text>
+        {foods.map((food) => (
+          <View key={food.id} style={dStyles.itemRow}>
+            <View style={dStyles.itemInfo}>
+              <Text style={dStyles.itemName}>{food.name}</Text>
+              <Text style={dStyles.itemPortion}>{food.portion}</Text>
             </View>
-            <Text style={dashStyles.itemCal}>{food.nutrition.calories} kcal</Text>
-            <View style={[dashStyles.itemGrade, { backgroundColor: colors.grade[food.grade] }]}>
-              <Text style={dashStyles.itemGradeText}>{food.grade}</Text>
+            <Text style={dStyles.itemCal}>{food.nutrition.calories} kcal</Text>
+            <View style={[dStyles.itemGrade, { backgroundColor: colors.grade[food.grade] }]}>
+              <Text style={dStyles.itemGradeText}>{food.grade}</Text>
             </View>
           </View>
         ))}
@@ -321,43 +327,55 @@ const LegendItem: React.FC<{ color: string; label: string; value: string }> = ({
   color,
   label,
   value,
-}) => (
-  <View style={dashStyles.legendItem}>
-    <View style={[dashStyles.legendDot, { backgroundColor: color }]} />
-    <Text style={dashStyles.legendLabel}>{label}</Text>
-    <Text style={dashStyles.legendValue}>{value}</Text>
-  </View>
-);
+}) => {
+  const { colors } = useThemeContext();
+  const dStyles = useMemo(() => createDashStyles(colors), [colors]);
+  return (
+    <View style={dStyles.legendItem}>
+      <View style={[dStyles.legendDot, { backgroundColor: color }]} />
+      <Text style={dStyles.legendLabel}>{label}</Text>
+      <Text style={dStyles.legendValue}>{value}</Text>
+    </View>
+  );
+};
 
 const NutrientCard: React.FC<{
   emoji: string;
   label: string;
   value: string;
   unit: string;
-}> = ({ emoji, label, value, unit }) => (
-  <View style={[dashStyles.nutrientCard, shadows.sm]}>
-    <Text style={dashStyles.nutrientEmoji}>{emoji}</Text>
-    <Text style={dashStyles.nutrientValue}>{value}</Text>
-    <Text style={dashStyles.nutrientUnit}>{unit}</Text>
-    <Text style={dashStyles.nutrientLabel}>{label}</Text>
-  </View>
-);
-
-const RecommendationRow: React.FC<{ rec: MealRecommendation }> = ({ rec }) => (
-  <View style={styles.recommendationRow}>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.recommendationFood}>{rec.foodName}</Text>
-      <Text style={styles.recommendationReason}>{rec.reason}</Text>
+}> = ({ emoji, label, value, unit }) => {
+  const { colors } = useThemeContext();
+  const dStyles = useMemo(() => createDashStyles(colors), [colors]);
+  return (
+    <View style={[dStyles.nutrientCard, shadows.sm]}>
+      <Text style={dStyles.nutrientEmoji}>{emoji}</Text>
+      <Text style={dStyles.nutrientValue}>{value}</Text>
+      <Text style={dStyles.nutrientUnit}>{unit}</Text>
+      <Text style={dStyles.nutrientLabel}>{label}</Text>
     </View>
-    <View style={styles.recommendationScores}>
-      <Text style={styles.recommendationBadge}>Fit {rec.macroFitScore}</Text>
-      <Text style={styles.recommendationBadge}>Taste {rec.tasteScore}</Text>
-      <Text style={[styles.recommendationBadge, styles.recommendationBadgePrimary]}>{rec.combinedScore}</Text>
-    </View>
-  </View>
-);
+  );
+};
 
-const styles = StyleSheet.create({
+const RecommendationRow: React.FC<{ rec: MealRecommendation }> = ({ rec }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.recommendationRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.recommendationFood}>{rec.foodName}</Text>
+        <Text style={styles.recommendationReason}>{rec.reason}</Text>
+      </View>
+      <View style={styles.recommendationScores}>
+        <Text style={styles.recommendationBadge}>Fit {rec.macroFitScore}</Text>
+        <Text style={styles.recommendationBadge}>Taste {rec.tasteScore}</Text>
+        <Text style={[styles.recommendationBadge, styles.recommendationBadgePrimary]}>{rec.combinedScore}</Text>
+      </View>
+    </View>
+  );
+};
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,
@@ -574,7 +592,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const dashStyles = StyleSheet.create({
+const createDashStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     paddingHorizontal: spacing.md,
     gap: spacing.md,

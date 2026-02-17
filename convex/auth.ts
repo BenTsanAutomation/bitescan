@@ -177,8 +177,6 @@ export const signUp = mutation({
       externalId,
       email: normalizedEmail,
       displayName: args.displayName.trim(),
-      // Only return code in dev for the on-screen display
-      verificationCode: process.env.CONVEX_IS_DEV === "true" ? code : "",
       emailVerified: false,
     };
   },
@@ -331,9 +329,7 @@ export const resendVerification = mutation({
       code,
     });
 
-    return {
-      verificationCode: process.env.CONVEX_IS_DEV === "true" ? code : "",
-    };
+    return { success: true };
   },
 });
 

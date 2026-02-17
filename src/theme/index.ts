@@ -1,4 +1,5 @@
-export { colors, gradients } from './colors';
+export { colors, gradients, lightColors, darkColors } from './colors';
+export type { ThemeColors } from './colors';
 
 export const spacing = {
   xs: 4,

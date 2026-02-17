@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,9 @@ import {
 } from 'react-native';
 import * as theme from '../theme';
 import { MacroTargets } from '../types';
+import { useThemeContext } from '../contexts/ThemeContext';
 
-const { colors, spacing, borderRadius, typography, shadows } = theme;
+const { spacing, borderRadius, typography, shadows } = theme;
 
 interface MacroGoalsScreenProps {
   onSave: (targets: MacroTargets) => void;
@@ -32,6 +33,8 @@ const parseInput = (raw: string): { value: number | null; invalid: boolean } => 
 };
 
 export const MacroGoalsScreen: React.FC<MacroGoalsScreenProps> = ({ onSave, onSkip }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
@@ -193,7 +196,7 @@ export const MacroGoalsScreen: React.FC<MacroGoalsScreenProps> = ({ onSave, onSk
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: theme.ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,

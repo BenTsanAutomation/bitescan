@@ -1,9 +1,10 @@
 // Food Item Card with Nutrition Info
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
-import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import { spacing, borderRadius, typography, shadows, ThemeColors } from '../theme';
 import { FoodItem, HealthGrade } from '../types';
 import { GradeDisplay } from './GradeDisplay';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface FoodCardProps {
   food: FoodItem;
@@ -18,6 +19,8 @@ export const FoodCard: React.FC<FoodCardProps> = ({
   onPress,
   expanded = false,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const scale = useRef(new Animated.Value(1)).current;
   const entryOpacity = useRef(new Animated.Value(0)).current;
   const entryTranslateY = useRef(new Animated.Value(30)).current;
@@ -134,36 +137,44 @@ interface MacroBarProps {
   color: string;
 }
 
-const MacroBar: React.FC<MacroBarProps> = ({ label, value, color }) => (
-  <View style={styles.macroItem}>
-    <View style={styles.macroLabelRow}>
-      <Text style={styles.macroLabel}>{label}</Text>
-      <Text style={styles.macroValue}>{value}g</Text>
+const MacroBar: React.FC<MacroBarProps> = ({ label, value, color }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.macroItem}>
+      <View style={styles.macroLabelRow}>
+        <Text style={styles.macroLabel}>{label}</Text>
+        <Text style={styles.macroValue}>{value}g</Text>
+      </View>
+      <View style={styles.macroBarBg}>
+        <View 
+          style={[
+            styles.macroBarFill, 
+            { width: `${Math.min(value * 2, 100)}%`, backgroundColor: color }
+          ]} 
+        />
+      </View>
     </View>
-    <View style={styles.macroBarBg}>
-      <View 
-        style={[
-          styles.macroBarFill, 
-          { width: `${Math.min(value * 2, 100)}%`, backgroundColor: color }
-        ]} 
-      />
-    </View>
-  </View>
-);
+  );
+};
 
 interface DetailItemProps {
   label: string;
   value: string;
 }
 
-const DetailItem: React.FC<DetailItemProps> = ({ label, value }) => (
-  <View style={styles.detailItem}>
-    <Text style={styles.detailValue}>{value}</Text>
-    <Text style={styles.detailLabel}>{label}</Text>
-  </View>
-);
+const DetailItem: React.FC<DetailItemProps> = ({ label, value }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.detailItem}>
+      <Text style={styles.detailValue}>{value}</Text>
+      <Text style={styles.detailLabel}>{label}</Text>
+    </View>
+  );
+};
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   card: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.lg,

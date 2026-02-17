@@ -114,24 +114,6 @@ export interface ScanHistory {
   savedAt: number;
 }
 
-// Database tables
-export interface DBUser {
-  id: string;
-  email: string | null;
-  display_name: string | null;
-  preferences_json: string;
-  created_at: number;
-  last_scan_at: number | null;
-}
-
-export interface DBScan {
-  id: string;
-  user_id: string;
-  image_uri: string;
-  result_json: string;
-  created_at: number;
-}
-
 // API Types
 export interface AnalyzeFoodRequest {
   imageBase64: string;
@@ -170,6 +152,7 @@ export interface MealEntry {
 
 export interface RecentMeal extends MealEntry {
   imageUri?: string;
+  date?: string;
 }
 
 export interface MacroTotals {
@@ -186,42 +169,11 @@ export interface MacroRemaining extends MacroTotals {
   fatPct: number;
 }
 
-// Database table types
-export interface DBDailyLog {
-  id: string;
-  user_id: string;
-  date: string;
-  target_calories: number;
-  target_protein: number;
-  target_carbs: number;
-  target_fat: number;
-  created_at: number;
-}
-
-export interface DBMealEntry {
-  id: string;
-  log_id: string;
-  scan_id: string | null;
-  food_name: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  timestamp: number;
-}
-
 export interface UserStreak {
   userId: string;
   currentStreak: number;
   longestStreak: number;
   lastActiveDate: string | null;
-}
-
-export interface DBUserStreak {
-  user_id: string;
-  current_streak: number;
-  longest_streak: number;
-  last_active_date: string | null;
 }
 
 export interface DailyMacroSummary {

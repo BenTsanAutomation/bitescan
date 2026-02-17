@@ -10,7 +10,10 @@
 
 import type * as auth from "../auth.js";
 import type * as authMiddleware from "../authMiddleware.js";
+import type * as cleanup from "../cleanup.js";
+import type * as crons from "../crons.js";
 import type * as email from "../email.js";
+import type * as files from "../files.js";
 import type * as meals from "../meals.js";
 
 import type {
@@ -22,7 +25,10 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authMiddleware: typeof authMiddleware;
+  cleanup: typeof cleanup;
+  crons: typeof crons;
   email: typeof email;
+  files: typeof files;
   meals: typeof meals;
 }>;
 

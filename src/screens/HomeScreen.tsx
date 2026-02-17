@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { borderRadius, colors, shadows, spacing, typography } from '../theme';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { borderRadius, shadows, spacing, typography, ThemeColors } from '../theme';
 import { MacroRemaining, MacroTargets, MacroTotals, RecentMeal, UserStreak } from '../types';
 import { CircularProgress } from '../components/CircularProgress';
 import { WeekCalendar } from '../components/WeekCalendar';
 import { MealCard } from '../components/MealCard';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface HomeScreenProps {
   todayTotals: MacroTotals;
@@ -19,6 +20,8 @@ interface HomeScreenProps {
   error?: string | null;
   onRefresh?: () => Promise<void>;
   onDeleteMeal?: (mealId: string) => Promise<void>;
+  deletingMealIds?: string[];
+  onMealPress?: (meal: RecentMeal) => void;
 }
 
 const clampProgress = (current: number, target: number): number => {
@@ -51,7 +54,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   error,
   onRefresh,
   onDeleteMeal,
+  deletingMealIds = [],
+  onMealPress,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
@@ -189,6 +196,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             fat={meal.fat}
             imageUri={meal.imageUri}
             onDelete={onDeleteMeal ? () => onDeleteMeal(meal.id) : undefined}
+            onPress={onMealPress ? () => onMealPress(meal) : undefined}
+            isDeleting={deletingMealIds.includes(meal.id)}
           />
         ))
       )}
@@ -196,7 +205,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,

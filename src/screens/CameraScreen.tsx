@@ -1,10 +1,11 @@
 // Camera Screen with Viewfinder Frame
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions, Animated, Easing } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { colors, spacing, borderRadius, typography } from '../theme';
+import { spacing, borderRadius, typography, ThemeColors } from '../theme';
 import { LeafParticles } from '../animations/LeafParticles';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const VIEWFINDER_SIZE = SCREEN_WIDTH * 0.75;
@@ -18,6 +19,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   onCapture,
   onClose,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [permission, requestPermission] = useCameraPermissions();
   const [isCapturing, setIsCapturing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
@@ -76,7 +79,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.8,
     });
 
@@ -176,7 +179,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.neutral[900],

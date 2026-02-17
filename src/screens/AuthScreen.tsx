@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,8 +11,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { borderRadius, colors, shadows, spacing, typography } from "../theme";
+import { borderRadius, shadows, spacing, typography, ThemeColors } from "../theme";
 import type { AuthUser } from "../services/auth";
+import { useThemeContext } from "../contexts/ThemeContext";
 
 interface AuthScreenProps {
   onAuthenticated: (user: AuthUser, isNewUser: boolean) => void;
@@ -21,9 +22,9 @@ interface AuthScreenProps {
     email: string,
     password: string,
     displayName: string
-  ) => Promise<{ user: AuthUser; verificationCode: string }>;
+  ) => Promise<{ user: AuthUser }>;
   onVerifyEmail: (email: string, code: string) => Promise<void>;
-  onResendCode: (email: string) => Promise<string>;
+  onResendCode: (email: string) => Promise<void>;
   onRequestPasswordReset?: (email: string) => Promise<{ sent: boolean }>;
   onResetPassword?: (email: string, code: string, newPassword: string) => Promise<void>;
 }
@@ -39,6 +40,8 @@ export default function AuthScreen({
   onRequestPasswordReset,
   onResetPassword,
 }: AuthScreenProps) {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,7 +53,6 @@ export default function AuthScreen({
   // Verification state
   const [showVerifyScreen, setShowVerifyScreen] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
-  const [pendingVerificationCode, setPendingVerificationCode] = useState("");
   const [resetCode, setResetCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
@@ -99,12 +101,11 @@ export default function AuthScreen({
         const user = await onSignIn(email.trim(), password);
         onAuthenticated(user, false);
       } else {
-        const result = await onSignUp(
+        await onSignUp(
           email.trim(),
           password,
           displayName.trim()
         );
-        setPendingVerificationCode(result.verificationCode);
         setShowVerifyScreen(true);
       }
     } catch (err) {
@@ -151,9 +152,8 @@ export default function AuthScreen({
   const handleResendCode = async () => {
     setLoading(true);
     try {
-      const code = await onResendCode(email.trim());
-      setPendingVerificationCode(code);
-      Alert.alert("Code Resent", "A new verification code has been generated.");
+      await onResendCode(email.trim());
+      Alert.alert("Code Resent", "A new verification code has been sent.");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to resend code";
@@ -265,17 +265,6 @@ export default function AuthScreen({
               {email.trim().toLowerCase()}
             </Text>
           </View>
-
-          {__DEV__ && pendingVerificationCode ? (
-            <View style={styles.codePreview}>
-              <Text style={styles.codePreviewLabel}>
-                DEV — Your verification code:
-              </Text>
-              <Text style={styles.codePreviewValue} selectable={true}>
-                {pendingVerificationCode}
-              </Text>
-            </View>
-          ) : null}
 
           <View style={[styles.card, shadows.md]}>
             <Text style={styles.label}>Verification Code</Text>
@@ -583,7 +572,7 @@ export default function AuthScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,
@@ -728,26 +717,6 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeights.semibold,
     color: colors.primary[600],
     marginTop: spacing.xs,
-  },
-  codePreview: {
-    backgroundColor: "#fef9c3",
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: "#fde047",
-    alignItems: "center",
-  },
-  codePreviewLabel: {
-    fontSize: typography.fontSizes.xs,
-    color: "#854d0e",
-    marginBottom: spacing.xs,
-  },
-  codePreviewValue: {
-    fontSize: typography.fontSizes.xxl,
-    fontWeight: typography.fontWeights.bold,
-    color: "#854d0e",
-    letterSpacing: 4,
   },
   toggleButton: {
     marginTop: spacing.lg,

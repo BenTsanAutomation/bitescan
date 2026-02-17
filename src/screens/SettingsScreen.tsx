@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   View,
@@ -11,13 +11,14 @@ import {
   TextInput,
   Switch,
 } from 'react-native';
-import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import { spacing, borderRadius, typography, shadows, ThemeColors } from '../theme';
 import { ChipSelector } from '../components/ChipSelector';
 import { User, UserPreferences, DietaryGoal, MacroTargets } from '../types';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface SettingsScreenProps {
   user: User;
-  onSave: (prefs: UserPreferences) => void;
+  onSave: (prefs: UserPreferences) => Promise<void>;
   onClose: () => void;
   onClearTodayData?: () => Promise<void>;
   onExportData?: () => Promise<void>;
@@ -32,6 +33,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onExportData,
   onResetSettings,
 }) => {
+  const { colors, isDarkMode, setDarkMode: applyDarkMode } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [goals, setGoals] = useState<DietaryGoal[]>(user.preferences.goals || []);
   const [priorities, setPriorities] = useState<Partial<Record<DietaryGoal, number>>>(
     user.preferences.priorities || {}
@@ -40,9 +43,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     user.preferences.macroTargets || { calories: 2000, protein: 150, carbs: 200, fat: 65 }
   );
   const [useMetric, setUseMetric] = useState(user.preferences.useMetric ?? false);
-  const [darkMode, setDarkMode] = useState(user.preferences.darkMode ?? false);
+  const [darkMode, setDarkMode] = useState(isDarkMode);
 
-  const handleSave = () => {
+  const handleDarkModeToggle = useCallback((enabled: boolean) => {
+    setDarkMode(enabled);
+    void applyDarkMode(enabled);
+  }, [applyDarkMode]);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
     const updatedPrefs: UserPreferences = {
       goals,
       priorities,
@@ -51,8 +60,19 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       useMetric,
       darkMode,
     };
-    onSave(updatedPrefs);
-    onClose();
+    setSaving(true);
+    try {
+      await onSave(updatedPrefs);
+      onClose();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not sync preferences. Please try again.";
+      Alert.alert("Sync Failed", message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -65,8 +85,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <Text style={styles.backButtonText}>←</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Settings</Text>
-        <Pressable onPress={handleSave} style={styles.saveButton}>
-          <Text style={styles.saveButtonText}>Save</Text>
+        <Pressable onPress={() => void handleSave()} style={styles.saveButton} disabled={saving}>
+          <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
         </Pressable>
       </View>
 
@@ -175,14 +195,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <View style={styles.settingRow}>
               <View style={styles.settingInfo}>
                 <Text style={styles.settingLabel}>Dark Mode</Text>
-                <Text style={styles.settingDescription}>Coming soon</Text>
+                <Text style={styles.settingDescription}>Use dark theme colors</Text>
               </View>
               <Switch
                 value={darkMode}
-                onValueChange={setDarkMode}
-                disabled
+                onValueChange={handleDarkModeToggle}
                 trackColor={{ false: colors.neutral[300], true: colors.primary[300] }}
-                thumbColor={colors.neutral[100]}
+                thumbColor={darkMode ? colors.primary[500] : colors.neutral[100]}
               />
             </View>
           </View>
@@ -258,7 +277,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,

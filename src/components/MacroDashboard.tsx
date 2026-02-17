@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import { spacing, borderRadius, typography, shadows, ThemeColors } from '../theme';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface MacroTotals {
   calories: number;
@@ -38,7 +39,7 @@ const MACRO_META: Array<{
   { key: 'fat', label: 'Fat', emoji: '🥑' },
 ];
 
-const getProgressColor = (percent: number): string => {
+const getProgressColor = (percent: number, colors: ThemeColors): string => {
   if (percent > 100) return colors.error;
   if (percent >= 80) return colors.secondary[400];
   return colors.primary[500];
@@ -50,6 +51,8 @@ const formatValue = (value: number, key: MacroKey): string => {
 };
 
 export const MacroDashboard: React.FC<MacroDashboardProps> = ({ user, todayTotals }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const targets: MacroTotals = {
     calories: user.preferences.macroTargets?.calories ?? 0,
     protein: user.preferences.macroTargets?.protein ?? 0,
@@ -103,7 +106,7 @@ export const MacroDashboard: React.FC<MacroDashboardProps> = ({ user, todayTotal
         const target = targets[macro.key];
         const percent = getPercent(macro.key);
         const remaining = target - current;
-        const color = getProgressColor(percent);
+        const color = getProgressColor(percent, colors);
 
         return (
           <View key={macro.key} style={styles.row}>
@@ -170,7 +173,7 @@ export const MacroDashboard: React.FC<MacroDashboardProps> = ({ user, todayTotal
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.lg,

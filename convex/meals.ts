@@ -98,6 +98,34 @@ export const addMealEntry = mutation({
   },
 });
 
+export const updateMealEntry = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("mealEntries"),
+    foodName: v.string(),
+    calories: v.number(),
+    protein: v.number(),
+    carbs: v.number(),
+    fat: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
+    const entry = await ctx.db.get(args.id);
+    if (!entry || entry.externalUserId !== externalUserId) {
+      throw new Error("Meal entry not found or access denied");
+    }
+
+    await ctx.db.patch(args.id, {
+      foodName: args.foodName,
+      calories: args.calories,
+      protein: args.protein,
+      carbs: args.carbs,
+      fat: args.fat,
+    });
+  },
+});
+
 export const getMealsForDate = query({
   args: {
     token: v.string(),
@@ -128,7 +156,11 @@ export const getMealsForDate = query({
             .query("scans")
             .withIndex("by_scanId", (q) => q.eq("scanId", meal.scanId!))
             .first();
-          imageUri = scan?.imageUri;
+          if (scan?.storageId) {
+            imageUri = (await ctx.storage.getUrl(scan.storageId)) ?? undefined;
+          } else {
+            imageUri = scan?.imageUri;
+          }
         }
         return {
           id: meal._id,
@@ -140,6 +172,7 @@ export const getMealsForDate = query({
           carbs: meal.carbs,
           fat: meal.fat,
           timestamp: meal.timestamp,
+          date: log.date,
           imageUri,
         };
       })
@@ -351,7 +384,8 @@ export const saveScan = mutation({
   args: {
     token: v.string(),
     scanId: v.string(),
-    imageUri: v.string(),
+    imageUri: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
     resultJson: v.string(),
   },
   handler: async (ctx, args) => {
@@ -360,7 +394,8 @@ export const saveScan = mutation({
     await ctx.db.insert("scans", {
       externalUserId,
       scanId: args.scanId,
-      imageUri: args.imageUri,
+      imageUri: args.imageUri ?? "",
+      storageId: args.storageId,
       resultJson: args.resultJson,
     });
 
@@ -374,6 +409,75 @@ export const saveScan = mutation({
     if (profile) {
       await ctx.db.patch(profile._id, { lastScanAt: Date.now() });
     }
+  },
+});
+
+export const getMealHistory = query({
+  args: {
+    token: v.string(),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+    const now = Date.now();
+    const windowDays = Math.max(1, args.days ?? 30);
+    const cutoff = now - windowDays * 24 * 60 * 60 * 1000;
+
+    const meals = await ctx.db
+      .query("mealEntries")
+      .withIndex("by_externalUserId", (q) =>
+        q.eq("externalUserId", externalUserId)
+      )
+      .filter((q) => q.gte(q.field("timestamp"), cutoff))
+      .order("desc")
+      .collect();
+
+    const logMap = new Map<string, string>();
+    const scanUrlMap = new Map<string, string | undefined>();
+
+    for (const meal of meals) {
+      const logKey = meal.dailyLogId as string;
+      if (!logMap.has(logKey)) {
+        const log = await ctx.db.get(meal.dailyLogId);
+        if (log) {
+          logMap.set(logKey, log.date);
+        }
+      }
+
+      if (meal.scanId && !scanUrlMap.has(meal.scanId)) {
+        const scan = await ctx.db
+          .query("scans")
+          .withIndex("by_scanId", (q) => q.eq("scanId", meal.scanId!))
+          .first();
+
+        if (!scan) {
+          scanUrlMap.set(meal.scanId, undefined);
+        } else if (scan.storageId) {
+          scanUrlMap.set(
+            meal.scanId,
+            (await ctx.storage.getUrl(scan.storageId)) ?? undefined
+          );
+        } else {
+          scanUrlMap.set(meal.scanId, scan.imageUri);
+        }
+      }
+    }
+
+    return meals.map((meal) => ({
+      id: meal._id,
+      logId: meal.dailyLogId,
+      scanId: meal.scanId,
+      foodName: meal.foodName,
+      calories: meal.calories,
+      protein: meal.protein,
+      carbs: meal.carbs,
+      fat: meal.fat,
+      timestamp: meal.timestamp,
+      date:
+        logMap.get(meal.dailyLogId as string) ??
+        new Date(meal.timestamp).toISOString().slice(0, 10),
+      imageUri: meal.scanId ? scanUrlMap.get(meal.scanId) : undefined,
+    }));
   },
 });
 
@@ -392,6 +496,34 @@ export const getScanHistory = query({
       )
       .order("desc")
       .take(args.limit ?? 50);
+  },
+});
+
+export const getScanCount = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+    const scans = await ctx.db
+      .query("scans")
+      .withIndex("by_externalUserId", (q) =>
+        q.eq("externalUserId", externalUserId)
+      )
+      .collect();
+    return scans.length;
+  },
+});
+
+export const getTotalMealCount = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+    const meals = await ctx.db
+      .query("mealEntries")
+      .withIndex("by_externalUserId", (q) =>
+        q.eq("externalUserId", externalUserId)
+      )
+      .collect();
+    return meals.length;
   },
 });
 
@@ -465,7 +597,7 @@ export const recordActivity = mutation({
 });
 
 function daysBetween(startDate: string, endDate: string): number {
-  const start = new Date(`${startDate}T00:00:00`).getTime();
-  const end = new Date(`${endDate}T00:00:00`).getTime();
+  const start = new Date(`${startDate}T00:00:00Z`).getTime();
+  const end = new Date(`${endDate}T00:00:00Z`).getTime();
   return Math.round((end - start) / (24 * 60 * 60 * 1000));
 }

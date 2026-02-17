@@ -1,80 +1,98 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { borderRadius, colors, shadows, spacing, typography } from '../theme';
-import { DailyMacroSummary, MacroTotals } from '../types';
+import React, { useMemo } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { borderRadius, shadows, spacing, typography, ThemeColors } from "../theme";
+import { DailyMacroSummary, MacroTargets } from "../types";
+import { useThemeContext } from "../contexts/ThemeContext";
 
 interface ProgressScreenProps {
-  weekData: DailyMacroSummary[];
+  data: DailyMacroSummary[];
+  macroTargets: MacroTargets;
+  range: 7 | 14 | 30;
+  onRangeChange: (range: 7 | 14 | 30) => void;
 }
 
 const MAX_BAR_HEIGHT = 160;
 
 const getDateLabel = (dateKey: string): string => {
   const parsed = new Date(`${dateKey}T00:00:00`);
-  const labels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-  return labels[parsed.getDay()] ?? '?';
+  const labels = ["S", "M", "T", "W", "T", "F", "S"];
+  return labels[parsed.getDay()] ?? "?";
 };
 
-const safeAverage = (sum: number, count: number): number => {
-  if (count <= 0) return 0;
-  return sum / count;
-};
+export const ProgressScreen: React.FC<ProgressScreenProps> = ({
+  data,
+  macroTargets,
+  range,
+  onRangeChange,
+}) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
-const buildWeeklyAverageMacros = (rows: DailyMacroSummary[]): MacroTotals => {
-  if (rows.length === 0) {
-    return { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  }
-
-  const total = rows.reduce(
-    (acc, row) => ({
-      calories: acc.calories + row.calories,
-      protein: acc.protein + row.protein,
-      carbs: acc.carbs + row.carbs,
-      fat: acc.fat + row.fat,
-    }),
-    { calories: 0, protein: 0, carbs: 0, fat: 0 }
-  );
-
-  return {
-    calories: safeAverage(total.calories, rows.length),
-    protein: safeAverage(total.protein, rows.length),
-    carbs: safeAverage(total.carbs, rows.length),
-    fat: safeAverage(total.fat, rows.length),
-  };
-};
-
-export const ProgressScreen: React.FC<ProgressScreenProps> = ({ weekData }) => {
-  const averageMacros = useMemo(() => buildWeeklyAverageMacros(weekData), [weekData]);
   const maxCalories = useMemo(
-    () => Math.max(1, ...weekData.map((entry) => entry.calories)),
-    [weekData]
+    () => Math.max(macroTargets.calories, 1, ...data.map((entry) => entry.calories)),
+    [data, macroTargets.calories]
   );
 
-  const weekTotals = useMemo(
-    () =>
-      weekData.reduce(
-        (acc, row) => ({
-          calories: acc.calories + row.calories,
-          protein: acc.protein + row.protein,
-          carbs: acc.carbs + row.carbs,
-          fat: acc.fat + row.fat,
-        }),
-        { calories: 0, protein: 0, carbs: 0, fat: 0 }
-      ),
-    [weekData]
-  );
+  const averageCalories = useMemo(() => {
+    if (data.length === 0) return 0;
+    return (
+      data.reduce((sum, row) => sum + row.calories, 0) /
+      Math.max(1, data.length)
+    );
+  }, [data]);
+
+  const goalVsActual = useMemo(() => {
+    return {
+      calories: averageCalories - macroTargets.calories,
+      protein:
+        data.reduce((sum, row) => sum + row.protein, 0) /
+          Math.max(1, data.length) -
+        macroTargets.protein,
+      carbs:
+        data.reduce((sum, row) => sum + row.carbs, 0) /
+          Math.max(1, data.length) -
+        macroTargets.carbs,
+      fat:
+        data.reduce((sum, row) => sum + row.fat, 0) / Math.max(1, data.length) -
+        macroTargets.fat,
+    };
+  }, [averageCalories, data, macroTargets]);
+
+  const averageLineHeight = (averageCalories / maxCalories) * MAX_BAR_HEIGHT;
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Progress</Text>
-      <Text style={styles.subtitle}>Past 7 days summary</Text>
+      <Text style={styles.subtitle}>Nutrition trend and goal tracking</Text>
+
+      <View style={styles.rangeRow}>
+        {[7, 14, 30].map((value) => (
+          <Pressable
+            key={value}
+            onPress={() => onRangeChange(value as 7 | 14 | 30)}
+            style={[
+              styles.rangeChip,
+              range === value && styles.rangeChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.rangeChipText,
+                range === value && styles.rangeChipTextActive,
+              ]}
+            >
+              {value}d
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       <View style={[styles.chartCard, shadows.md]}>
         <Text style={styles.cardTitle}>Daily Calories</Text>
         <View style={styles.chartWrap}>
-          {weekData.map((day) => {
+          <View style={[styles.averageLine, { bottom: Math.max(4, averageLineHeight) }]} />
+          {data.map((day) => {
             const barHeight = (day.calories / maxCalories) * MAX_BAR_HEIGHT;
-
             return (
               <View key={day.date} style={styles.barCol}>
                 <Text style={styles.barValue}>{Math.round(day.calories)}</Text>
@@ -86,136 +104,169 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({ weekData }) => {
             );
           })}
         </View>
+        <Text style={styles.averageLabel}>
+          Avg: {Math.round(averageCalories)} kcal/day
+        </Text>
       </View>
 
       <View style={[styles.summaryCard, shadows.sm]}>
-        <Text style={styles.cardTitle}>Weekly Totals</Text>
-        <View style={styles.row}>
-          <SummaryCell label="Calories" value={`${Math.round(weekTotals.calories)} kcal`} />
-          <SummaryCell label="Protein" value={`${Math.round(weekTotals.protein)} g`} />
-        </View>
-        <View style={styles.row}>
-          <SummaryCell label="Carbs" value={`${Math.round(weekTotals.carbs)} g`} />
-          <SummaryCell label="Fat" value={`${Math.round(weekTotals.fat)} g`} />
-        </View>
-      </View>
-
-      <View style={[styles.summaryCard, shadows.sm]}>
-        <Text style={styles.cardTitle}>Average Macros / Day</Text>
-        <View style={styles.row}>
-          <SummaryCell label="Calories" value={`${Math.round(averageMacros.calories)} kcal`} />
-          <SummaryCell label="Protein" value={`${Math.round(averageMacros.protein)} g`} />
-        </View>
-        <View style={styles.row}>
-          <SummaryCell label="Carbs" value={`${Math.round(averageMacros.carbs)} g`} />
-          <SummaryCell label="Fat" value={`${Math.round(averageMacros.fat)} g`} />
-        </View>
+        <Text style={styles.cardTitle}>Goal vs Actual (Avg / day)</Text>
+        <SummaryCell label="Calories" value={formatDelta(goalVsActual.calories, "kcal")} />
+        <SummaryCell label="Protein" value={formatDelta(goalVsActual.protein, "g")} />
+        <SummaryCell label="Carbs" value={formatDelta(goalVsActual.carbs, "g")} />
+        <SummaryCell label="Fat" value={formatDelta(goalVsActual.fat, "g")} />
       </View>
     </View>
   );
 };
 
-const SummaryCell: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <View style={styles.summaryCell}>
-    <Text style={styles.summaryLabel}>{label}</Text>
-    <Text style={styles.summaryValue}>{value}</Text>
-  </View>
-);
+const formatDelta = (value: number, unit: string): string => {
+  const rounded = Math.round(value);
+  if (rounded === 0) return `On target (${unit})`;
+  if (rounded > 0) return `+${rounded} ${unit}`;
+  return `${rounded} ${unit}`;
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.secondary,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  title: {
-    fontSize: typography.fontSizes.xxl,
-    fontWeight: typography.fontWeights.bold,
-    color: colors.text.primary,
-  },
-  subtitle: {
-    marginTop: -spacing.sm,
-    fontSize: typography.fontSizes.sm,
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
-  },
-  chartCard: {
-    backgroundColor: colors.background.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.neutral[200],
-    padding: spacing.md,
-  },
-  cardTitle: {
-    fontSize: typography.fontSizes.md,
-    fontWeight: typography.fontWeights.semibold,
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
-  },
-  chartWrap: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    minHeight: 210,
-  },
-  barCol: {
-    flex: 1,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  barValue: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.text.secondary,
-  },
-  barTrack: {
-    width: 24,
-    height: MAX_BAR_HEIGHT,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.neutral[100],
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  barFill: {
-    width: '100%',
-    backgroundColor: colors.primary[500],
-    borderRadius: borderRadius.full,
-    minHeight: 4,
-  },
-  barLabel: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.text.secondary,
-    fontWeight: typography.fontWeights.medium,
-  },
-  summaryCard: {
-    backgroundColor: colors.background.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.neutral[200],
-    padding: spacing.md,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  summaryCell: {
-    flex: 1,
-    backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-  },
-  summaryLabel: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.text.secondary,
-    marginBottom: 2,
-  },
-  summaryValue: {
-    fontSize: typography.fontSizes.sm,
-    fontWeight: typography.fontWeights.semibold,
-    color: colors.text.primary,
-  },
-});
+const SummaryCell: React.FC<{ label: string; value: string }> = ({ label, value }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.summaryCell}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text style={styles.summaryValue}>{value}</Text>
+    </View>
+  );
+};
+
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background.secondary,
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    title: {
+      fontSize: typography.fontSizes.xxl,
+      fontWeight: typography.fontWeights.bold,
+      color: colors.text.primary,
+    },
+    subtitle: {
+      marginTop: -spacing.sm,
+      fontSize: typography.fontSizes.sm,
+      color: colors.text.secondary,
+      marginBottom: spacing.sm,
+    },
+    rangeRow: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    rangeChip: {
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.neutral[300],
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      backgroundColor: colors.background.card,
+    },
+    rangeChipActive: {
+      borderColor: colors.primary[500],
+      backgroundColor: colors.primary[50],
+    },
+    rangeChipText: {
+      color: colors.text.secondary,
+      fontWeight: typography.fontWeights.medium,
+      fontSize: typography.fontSizes.sm,
+    },
+    rangeChipTextActive: {
+      color: colors.primary[700],
+      fontWeight: typography.fontWeights.semibold,
+    },
+    chartCard: {
+      backgroundColor: colors.background.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.neutral[200],
+      padding: spacing.md,
+    },
+    cardTitle: {
+      fontSize: typography.fontSizes.md,
+      fontWeight: typography.fontWeights.semibold,
+      color: colors.text.primary,
+      marginBottom: spacing.sm,
+    },
+    chartWrap: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      minHeight: 210,
+      position: "relative",
+    },
+    averageLine: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: colors.secondary[400],
+      opacity: 0.9,
+    },
+    averageLabel: {
+      marginTop: spacing.sm,
+      fontSize: typography.fontSizes.xs,
+      color: colors.text.secondary,
+    },
+    barCol: {
+      flex: 1,
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    barValue: {
+      fontSize: typography.fontSizes.xs,
+      color: colors.text.secondary,
+    },
+    barTrack: {
+      width: 20,
+      height: MAX_BAR_HEIGHT,
+      borderRadius: borderRadius.full,
+      backgroundColor: colors.neutral[100],
+      justifyContent: "flex-end",
+      overflow: "hidden",
+    },
+    barFill: {
+      width: "100%",
+      backgroundColor: colors.primary[500],
+      borderRadius: borderRadius.full,
+      minHeight: 4,
+    },
+    barLabel: {
+      fontSize: typography.fontSizes.xs,
+      color: colors.text.secondary,
+      fontWeight: typography.fontWeights.medium,
+    },
+    summaryCard: {
+      backgroundColor: colors.background.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.neutral[200],
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    summaryCell: {
+      backgroundColor: colors.background.secondary,
+      borderRadius: borderRadius.md,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.sm,
+    },
+    summaryLabel: {
+      fontSize: typography.fontSizes.xs,
+      color: colors.text.secondary,
+      marginBottom: 2,
+    },
+    summaryValue: {
+      fontSize: typography.fontSizes.sm,
+      fontWeight: typography.fontWeights.semibold,
+      color: colors.text.primary,
+    },
+  });
 
 export default ProgressScreen;

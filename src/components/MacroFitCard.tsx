@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import { spacing, borderRadius, typography, shadows, ThemeColors } from '../theme';
 import { FoodItem, MacroRemaining } from '../types';
 import { calculateMacroFit } from '../utils/macroCalculations';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface MacroFitCardProps {
   food: FoodItem;
@@ -10,6 +11,8 @@ interface MacroFitCardProps {
 }
 
 export const MacroFitCard: React.FC<MacroFitCardProps> = ({ food, remaining }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const fitScore = useMemo(() => calculateMacroFit(food, remaining), [food, remaining]);
 
   const traffic = useMemo(() => {
@@ -23,7 +26,7 @@ export const MacroFitCard: React.FC<MacroFitCardProps> = ({ food, remaining }) =
       return { icon: '🟡', text: 'Good', label: 'GOOD FIT', color: colors.warning, bg: colors.secondary[50] };
     }
     return { icon: '🟡', text: 'Borderline', label: 'BORDERLINE', color: colors.warning, bg: colors.secondary[50] };
-  }, [fitScore.level]);
+  }, [fitScore.level, colors]);
 
   const breakdownText = `This will use: ${Math.round(food.nutrition.calories)} cal (${fitScore.calories}%), ${food.nutrition.protein.toFixed(1)} g protein (${fitScore.protein}%), ${food.nutrition.carbs.toFixed(1)} g carbs (${fitScore.carbs}%), ${food.nutrition.fat.toFixed(1)} g fat (${fitScore.fat}%).`;
 
@@ -47,7 +50,7 @@ export const MacroFitCard: React.FC<MacroFitCardProps> = ({ food, remaining }) =
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   card: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.lg,

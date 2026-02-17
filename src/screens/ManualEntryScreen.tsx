@@ -10,7 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { borderRadius, colors, shadows, spacing, typography } from '../theme';
+import { borderRadius, shadows, spacing, typography, ThemeColors } from '../theme';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 type ManualEntry = {
   foodName: string;
@@ -21,7 +22,11 @@ type ManualEntry = {
 };
 
 interface ManualEntryScreenProps {
-  onSave: (entry: ManualEntry) => void;
+  initialEntry?: ManualEntry;
+  title?: string;
+  subtitle?: string;
+  saveLabel?: string;
+  onSave: (entry: ManualEntry) => Promise<void> | void;
   onCancel: () => void;
 }
 
@@ -29,15 +34,26 @@ type FieldKey = 'foodName' | 'calories' | 'protein' | 'carbs' | 'fat';
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({
+  initialEntry,
+  title = 'Manual Entry',
+  subtitle = 'Add nutrition details when scan results are missing.',
+  saveLabel = 'Save Entry',
   onSave,
   onCancel,
 }) => {
-  const [foodName, setFoodName] = useState('');
-  const [calories, setCalories] = useState('');
-  const [protein, setProtein] = useState('');
-  const [carbs, setCarbs] = useState('');
-  const [fat, setFat] = useState('');
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [foodName, setFoodName] = useState(initialEntry?.foodName ?? '');
+  const [calories, setCalories] = useState(
+    initialEntry ? String(initialEntry.calories) : ''
+  );
+  const [protein, setProtein] = useState(
+    initialEntry ? String(initialEntry.protein) : ''
+  );
+  const [carbs, setCarbs] = useState(initialEntry ? String(initialEntry.carbs) : '');
+  const [fat, setFat] = useState(initialEntry ? String(initialEntry.fat) : '');
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [saving, setSaving] = useState(false);
 
   const caloriesRef = useRef<TextInput>(null);
   const proteinRef = useRef<TextInput>(null);
@@ -109,10 +125,15 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({
     };
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const entry = validate();
     if (!entry) return;
-    onSave(entry);
+    setSaving(true);
+    try {
+      await onSave(entry);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -127,10 +148,8 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>Manual Entry</Text>
-            <Text style={styles.subtitle}>
-              Add nutrition details when scan results are missing.
-            </Text>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
 
           <View style={[styles.card, shadows.md]}>
@@ -234,19 +253,19 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({
         </ScrollView>
 
         <View style={[styles.actionBar, shadows.lg]}>
-          <Pressable style={styles.cancelButton} onPress={onCancel}>
+          <Pressable style={styles.cancelButton} onPress={onCancel} disabled={saving}>
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.saveButton,
-              !isFilled && styles.saveButtonDisabled,
+              (!isFilled || saving) && styles.saveButtonDisabled,
               pressed && isFilled && styles.saveButtonPressed,
             ]}
             onPress={handleSave}
-            disabled={!isFilled}
+            disabled={!isFilled || saving}
           >
-            <Text style={styles.saveButtonText}>Save Entry</Text>
+            <Text style={styles.saveButtonText}>{saving ? 'Saving...' : saveLabel}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -254,7 +273,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   flex: {
     flex: 1,
   },

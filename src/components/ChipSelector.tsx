@@ -1,9 +1,10 @@
 // Chip/Tag Selection + Priority Slider Component
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Animated } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { colors, spacing, borderRadius, typography } from '../theme';
+import { spacing, borderRadius, typography, ThemeColors } from '../theme';
 import { DietaryGoal } from '../types';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface ChipSelectorProps {
   selectedGoals: DietaryGoal[];
@@ -32,6 +33,8 @@ interface ChipProps {
 }
 
 const Chip: React.FC<ChipProps> = ({ goal, selected, onPress }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const scale = useRef(new Animated.Value(1)).current;
   const progress = useRef(new Animated.Value(selected ? 1 : 0)).current;
 
@@ -89,6 +92,8 @@ interface PrioritySliderProps {
 }
 
 const PrioritySlider: React.FC<PrioritySliderProps> = ({ goal, value, onChange }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.sliderContainer}>
       <View style={styles.sliderHeader}>
@@ -117,6 +122,9 @@ export const ChipSelector: React.FC<ChipSelectorProps> = ({
   onGoalsChange,
   onPrioritiesChange,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const toggleGoal = (goalId: DietaryGoal) => {
     if (selectedGoals.includes(goalId)) {
       onGoalsChange(selectedGoals.filter(g => g !== goalId));
@@ -176,7 +184,7 @@ export const ChipSelector: React.FC<ChipSelectorProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     paddingVertical: spacing.md,
   },

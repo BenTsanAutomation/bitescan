@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, spacing, borderRadius, typography } from "../theme";
+import { spacing, borderRadius, typography, ThemeColors } from "../theme";
+import { useThemeContext } from "../contexts/ThemeContext";
 
 interface Props {
   children: ReactNode;
@@ -10,6 +11,25 @@ interface State {
   hasError: boolean;
   error: Error | null;
 }
+
+const ErrorView: React.FC<{ message: string; onRetry: () => void }> = ({
+  message,
+  onRetry,
+}) => {
+  const { colors } = useThemeContext();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.emoji}>😵</Text>
+      <Text style={styles.title}>Something went wrong</Text>
+      <Text style={styles.message}>{message}</Text>
+      <Pressable style={styles.button} onPress={onRetry}>
+        <Text style={styles.buttonText}>Try Again</Text>
+      </Pressable>
+    </View>
+  );
+};
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, error: null };
@@ -29,16 +49,10 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <View style={styles.container}>
-          <Text style={styles.emoji}>😵</Text>
-          <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.message}>
-            {this.state.error?.message || "An unexpected error occurred."}
-          </Text>
-          <Pressable style={styles.button} onPress={this.handleReset}>
-            <Text style={styles.buttonText}>Try Again</Text>
-          </Pressable>
-        </View>
+        <ErrorView
+          message={this.state.error?.message || "An unexpected error occurred."}
+          onRetry={this.handleReset}
+        />
       );
     }
 
@@ -46,7 +60,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: "center",

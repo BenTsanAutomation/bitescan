@@ -47,6 +47,7 @@ export default defineSchema({
   scans: defineTable({
     externalUserId: v.string(),
     imageUri: v.string(),
+    storageId: v.optional(v.id("_storage")),
     resultJson: v.string(), // JSON-encoded ScanResult
     scanId: v.string(), // app-generated ID
   })

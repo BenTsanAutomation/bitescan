@@ -1,8 +1,9 @@
 // S-tier Grade Display Component (enhanced dopamine animations)
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
-import { colors, borderRadius, typography, shadows } from '../theme';
+import { borderRadius, typography, shadows, ThemeColors } from '../theme';
 import { HealthGrade } from '../types';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface GradeDisplayProps {
   grade: HealthGrade;
@@ -41,6 +42,8 @@ export const GradeDisplay: React.FC<GradeDisplayProps> = ({
   showLabel = true,
   animated = true,
 }) => {
+  const { colors } = useThemeContext();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const scale = useRef(new Animated.Value(animated ? 0.5 : 1)).current;
   const rotation = useRef(new Animated.Value(animated ? -10 : 0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
@@ -185,7 +188,7 @@ export const GradeDisplay: React.FC<GradeDisplayProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   wrapper: {
     alignItems: 'center',
     justifyContent: 'center',

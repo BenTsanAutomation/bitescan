@@ -1,7 +1,7 @@
 // Nature-inspired Leaf Particle Animation using React Native's built-in Animated API
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, Easing } from 'react-native';
-import { colors } from '../theme';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -10,9 +10,10 @@ interface LeafProps {
   startX: number;
   size: number;
   duration: number;
+  leafColor: string;
 }
 
-const Leaf: React.FC<LeafProps> = ({ delay, startX, size, duration }) => {
+const Leaf: React.FC<LeafProps> = ({ delay, startX, size, duration, leafColor }) => {
   const progress = useRef(new Animated.Value(0)).current;
   const rotation = useRef(new Animated.Value(0)).current;
   const sway = useRef(new Animated.Value(0)).current;
@@ -97,7 +98,7 @@ const Leaf: React.FC<LeafProps> = ({ delay, startX, size, duration }) => {
           styles.leafShape,
           {
             borderRadius: size / 2,
-            backgroundColor: colors.primary[400],
+            backgroundColor: leafColor,
           },
         ]}
       />
@@ -114,6 +115,7 @@ export const LeafParticles: React.FC<LeafParticlesProps> = ({
   count = 8, 
   enabled = true 
 }) => {
+  const { colors } = useThemeContext();
   if (!enabled) return null;
 
   const leaves = React.useMemo(() => Array.from({ length: count }, (_, i) => ({
@@ -127,7 +129,7 @@ export const LeafParticles: React.FC<LeafParticlesProps> = ({
   return (
     <View style={styles.container} pointerEvents="none">
       {leaves.map((leaf) => (
-        <Leaf key={leaf.id} {...leaf} />
+        <Leaf key={leaf.id} {...leaf} leafColor={colors.primary[400]} />
       ))}
     </View>
   );
