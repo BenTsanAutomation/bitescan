@@ -38,8 +38,7 @@
           "cameraPermission": "BiteScan needs camera access to scan your food"
         }
       ],
-      "expo-sqlite",
-      "expo-secure-store"
+      "expo-sqlite"
     ]
   }
 }

@@ -9,7 +9,7 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
   requestTimeoutMs?: number;
 };
 
-const API_BASE_URL = extra.apiBaseUrl || (__DEV__ ? 'http://127.0.0.1:8420' : 'https://bitescan-api.sharkmastertest.cfd');
+const API_BASE_URL = extra.apiBaseUrl || 'https://bitescan-api.sharkmastertest.cfd';
 const REQUEST_TIMEOUT_MS = extra.requestTimeoutMs ?? 45_000;
 const API_TOKEN = extra.apiToken;
 

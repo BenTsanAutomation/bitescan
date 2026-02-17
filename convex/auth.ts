@@ -1,6 +1,7 @@
 // Convex auth functions — email/password with email verification
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 
 // Simple SHA-256-like hash using Convex's built-in capabilities
 // In production, use a proper hashing library via an action
@@ -103,12 +104,19 @@ export const signUp = mutation({
       used: false,
     });
 
+    // Send verification email via Resend
+    await ctx.scheduler.runAfter(0, internal.email.sendVerificationEmail, {
+      to: normalizedEmail,
+      displayName: args.displayName.trim(),
+      code,
+    });
+
     return {
       profileId,
       externalId,
       email: normalizedEmail,
       displayName: args.displayName.trim(),
-      verificationCode: code, // In production, send via email service
+      verificationCode: code,
       emailVerified: false,
     };
   },
@@ -251,7 +259,14 @@ export const resendVerification = mutation({
       used: false,
     });
 
-    return { verificationCode: code }; // In production, send via email
+    // Send verification email via Resend
+    await ctx.scheduler.runAfter(0, internal.email.sendVerificationEmail, {
+      to: normalizedEmail,
+      displayName: profile.displayName,
+      code,
+    });
+
+    return { verificationCode: code };
   },
 });
 

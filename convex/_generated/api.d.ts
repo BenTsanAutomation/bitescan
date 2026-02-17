@@ -1,10 +1,53 @@
 /* eslint-disable */
 /**
- * Generated API — stub for pre-deployment type checking.
- * Run `npx convex dev` to regenerate with real types.
+ * Generated `api` utility.
+ *
+ * THIS CODE IS AUTOMATICALLY GENERATED.
+ *
+ * To regenerate, run `npx convex dev`.
+ * @module
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export declare const api: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export declare const internal: any;
+import type * as auth from "../auth.js";
+import type * as email from "../email.js";
+import type * as meals from "../meals.js";
+
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
+
+declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
+  email: typeof email;
+  meals: typeof meals;
+}>;
+
+/**
+ * A utility for referencing Convex functions in your app's public API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
+export declare const api: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "public">
+>;
+
+/**
+ * A utility for referencing Convex functions in your app's internal API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = internal.myModule.myFunction;
+ * ```
+ */
+export declare const internal: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "internal">
+>;
+
+export declare const components: {};

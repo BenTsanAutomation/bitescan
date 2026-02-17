@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -175,10 +175,28 @@ export default function AuthScreen({
   };
 
   // ---- VERIFICATION SCREEN ----
+  // Hidden TextInput approach: a single hidden input captures keyboard,
+  // while 6 visible digit boxes display the entered code. This is the
+  // most reliable pattern on Android where styled TextInputs can be
+  // untappable.
+  const hiddenInputRef = useRef<TextInput>(null);
+
+  const focusHiddenInput = () => {
+    hiddenInputRef.current?.focus();
+  };
+
   if (showVerifyScreen) {
+    const digits = verificationCode.padEnd(6, " ").split("");
+
     return (
-      <View style={styles.container}>
-        <View style={styles.scrollContent}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.header}>
             <Text style={styles.logo}>📧</Text>
             <Text style={styles.appName}>Verify Your Email</Text>
@@ -190,30 +208,53 @@ export default function AuthScreen({
             </Text>
           </View>
 
-          {/* In production, remove this — code would be emailed */}
-          <View style={styles.codePreview}>
-            <Text style={styles.codePreviewLabel}>
-              Your verification code (dev mode):
-            </Text>
-            <Text style={styles.codePreviewValue}>
-              {pendingVerificationCode}
-            </Text>
-          </View>
+          {__DEV__ && pendingVerificationCode ? (
+            <View style={styles.codePreview}>
+              <Text style={styles.codePreviewLabel}>
+                DEV — Your verification code:
+              </Text>
+              <Text style={styles.codePreviewValue} selectable={true}>
+                {pendingVerificationCode}
+              </Text>
+            </View>
+          ) : null}
 
           <View style={[styles.card, shadows.md]}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Verification Code</Text>
-              <TextInput
-                style={[styles.input, styles.codeInput]}
-                value={verificationCode}
-                onChangeText={setVerificationCode}
-                placeholder="123456"
-                placeholderTextColor={colors.text.tertiary}
-                keyboardType="number-pad"
-                maxLength={6}
-                textAlign="center"
-              />
-            </View>
+            <Text style={styles.label}>Verification Code</Text>
+
+            {/* Hidden input that actually captures keyboard */}
+            <TextInput
+              ref={hiddenInputRef}
+              style={styles.hiddenInput}
+              value={verificationCode}
+              onChangeText={(text) =>
+                setVerificationCode(text.replace(/[^0-9]/g, "").slice(0, 6))
+              }
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus={true}
+              caretHidden={true}
+              returnKeyType="done"
+              onSubmitEditing={handleVerify}
+            />
+
+            {/* Visible digit boxes */}
+            <Pressable style={styles.digitRow} onPress={focusHiddenInput}>
+              {digits.map((digit, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.digitBox,
+                    i < verificationCode.length && styles.digitBoxFilled,
+                    i === verificationCode.length && styles.digitBoxActive,
+                  ]}
+                >
+                  <Text style={styles.digitText}>
+                    {digit !== " " ? digit : ""}
+                  </Text>
+                </View>
+              ))}
+            </Pressable>
 
             {error && (
               <View style={styles.errorBox}>
@@ -252,8 +293,8 @@ export default function AuthScreen({
           >
             <Text style={styles.toggleText}>Back to Sign In</Text>
           </Pressable>
-        </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -444,10 +485,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.neutral[200],
   },
-  codeInput: {
-    fontSize: typography.fontSizes.xl,
-    letterSpacing: 8,
+  hiddenInput: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  digitRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  digitBox: {
+    width: 48,
+    height: 56,
+    borderRadius: borderRadius.lg,
+    borderWidth: 2,
+    borderColor: colors.neutral[300],
+    backgroundColor: colors.background.secondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  digitBoxFilled: {
+    borderColor: colors.primary[500],
+    backgroundColor: colors.primary[50] ?? "#f0fdf4",
+  },
+  digitBoxActive: {
+    borderColor: colors.primary[400],
+    borderStyle: "dashed" as any,
+  },
+  digitText: {
+    fontSize: 24,
     fontWeight: typography.fontWeights.bold,
+    color: colors.text.primary,
   },
   errorBox: {
     backgroundColor: "#fef2f2",
