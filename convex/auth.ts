@@ -56,6 +56,46 @@ function generateVerificationCode(): string {
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const VERIFICATION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Rate limiting: max attempts per window
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMITS: Record<string, number> = {
+  signin: 10,
+  signup: 5,
+  reset: 5,
+  resend: 3,
+};
+
+async function checkRateLimit(
+  ctx: any,
+  action: string,
+  identifier: string
+): Promise<void> {
+  const key = `${action}:${identifier}`;
+  const maxAttempts = RATE_LIMITS[action] ?? 10;
+  const now = Date.now();
+
+  const existing = await ctx.db
+    .query("rateLimits")
+    .withIndex("by_key", (q: any) => q.eq("key", key))
+    .first();
+
+  if (existing) {
+    if (now - existing.windowStart > RATE_LIMIT_WINDOW_MS) {
+      // Window expired — reset
+      await ctx.db.patch(existing._id, { attempts: 1, windowStart: now });
+      return;
+    }
+    if (existing.attempts >= maxAttempts) {
+      throw new Error(
+        "Too many attempts. Please wait 15 minutes before trying again."
+      );
+    }
+    await ctx.db.patch(existing._id, { attempts: existing.attempts + 1 });
+  } else {
+    await ctx.db.insert("rateLimits", { key, attempts: 1, windowStart: now });
+  }
+}
+
 // ============================================================
 // SIGN UP
 // ============================================================
@@ -68,6 +108,7 @@ export const signUp = mutation({
   },
   handler: async (ctx, args) => {
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "signup", normalizedEmail);
 
     if (args.password.length < 6) {
       throw new Error("Password must be at least 6 characters");
@@ -150,6 +191,7 @@ export const signIn = mutation({
   },
   handler: async (ctx, args) => {
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "signin", normalizedEmail);
 
     const cred = await ctx.db
       .query("authCredentials")
@@ -253,6 +295,7 @@ export const resendVerification = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "resend", normalizedEmail);
 
     const profile = await ctx.db
       .query("profiles")
@@ -341,6 +384,7 @@ export const requestPasswordReset = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const normalizedEmail = args.email.trim().toLowerCase();
+    await checkRateLimit(ctx, "reset", normalizedEmail);
 
     const profile = await ctx.db
       .query("profiles")
@@ -365,7 +409,7 @@ export const requestPasswordReset = mutation({
       code,
     });
 
-    return { sent: true, code }; // code returned for dev; remove in production
+    return { sent: true };
   },
 });
 

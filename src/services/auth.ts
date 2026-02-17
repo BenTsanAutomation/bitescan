@@ -141,7 +141,7 @@ export async function resendVerificationEmail(
  */
 export async function requestPasswordReset(
   email: string
-): Promise<{ sent: boolean; code?: string }> {
+): Promise<{ sent: boolean }> {
   return await convex.mutation(api.auth.requestPasswordReset, { email });
 }
 
@@ -156,6 +156,13 @@ export async function resetPassword(
   await convex.mutation(api.auth.resetPassword, { email, code, newPassword });
   // Clear any stored session since all sessions are invalidated
   await deleteToken();
+}
+
+/**
+ * Get the current session token (for passing to authenticated Convex functions).
+ */
+export async function getSessionToken(): Promise<string | null> {
+  return getToken();
 }
 
 /**

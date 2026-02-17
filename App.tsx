@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -23,6 +22,7 @@ import {
   requestPasswordReset,
   resetPassword,
   updatePreferencesRemote,
+  getSessionToken,
 } from "./src/services/auth";
 import { api } from "./convex/_generated/api";
 import { ErrorBoundary } from "./src/components/ErrorBoundary";
@@ -45,6 +45,9 @@ import MacroGoalsScreen from "./src/screens/MacroGoalsScreen";
 import ManualEntryScreen from "./src/screens/ManualEntryScreen";
 import HomeScreen from "./src/screens/HomeScreen";
 import ProgressScreen from "./src/screens/ProgressScreen";
+import { HistoryScreen } from "./src/screens/HistoryScreen";
+import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { TabBar, TabKey } from "./src/components/TabBar";
 import { LeafParticles } from "./src/animations/LeafParticles";
 
 const DEFAULT_SKIP_TARGETS: MacroTargets = {
@@ -54,7 +57,6 @@ const DEFAULT_SKIP_TARGETS: MacroTargets = {
   fat: 70,
 };
 
-type TabKey = "home" | "progress" | "history" | "profile";
 type OverlayScreen = "tabs" | "camera" | "results" | "manual" | "settings";
 
 interface UserData {
@@ -113,11 +115,7 @@ const EMPTY_TOTALS: MacroTotals = {
   fat: 0,
 };
 
-const ResultsScreenWithRemaining = ResultsScreen as React.ComponentType<
-  React.ComponentProps<typeof ResultsScreen> & {
-    remainingMacros?: MacroRemaining | null;
-  }
->;
+// ResultsScreen already accepts remainingMacros in its props interface
 
 function AppInner() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -147,6 +145,13 @@ function AppInner() {
   const [weeklySummary, setWeeklySummary] = useState<DailyMacroSummary[]>([]);
   const [streak, setStreak] = useState<UserStreak | null>(null);
 
+  // Helper to get token — throws if not available
+  const getToken = async (): Promise<string> => {
+    const token = await getSessionToken();
+    if (!token) throw new Error("Not authenticated");
+    return token;
+  };
+
   const macroTargets = useMemo<MacroTargets>(() => {
     const targets = user?.preferences.macroTargets;
     return {
@@ -163,29 +168,22 @@ function AppInner() {
       if (!currentUserId) return;
 
       try {
+        const token = await getToken();
         const weekDates = getDateRange(7);
 
         const [totals, meals, weeklyData, daysWithMealsList, streakData] =
           await Promise.all([
-            convex.query(api.meals.getMacroTotalsForDate, {
-              externalUserId: currentUserId,
-              date,
-            }),
-            convex.query(api.meals.getMealsForDate, {
-              externalUserId: currentUserId,
-              date,
-            }),
+            convex.query(api.meals.getMacroTotalsForDate, { token, date }),
+            convex.query(api.meals.getMealsForDate, { token, date }),
             convex.query(api.meals.getWeeklyMacroSummary, {
-              externalUserId: currentUserId,
+              token,
               dates: weekDates,
             }),
             convex.query(api.meals.getMealDaysWithEntries, {
-              externalUserId: currentUserId,
+              token,
               dates: weekDates,
             }),
-            convex.query(api.meals.getStreak, {
-              externalUserId: currentUserId,
-            }),
+            convex.query(api.meals.getStreak, { token }),
           ]);
 
         setDayTotals(totals);
@@ -215,7 +213,7 @@ function AppInner() {
         const today = getTodayDateString();
         if (date === today) {
           const remaining = await convex.query(api.meals.getRemainingMacros, {
-            externalUserId: currentUserId,
+            token,
             date: today,
           });
           setRemainingMacros(remaining);
@@ -290,9 +288,9 @@ function AppInner() {
         setShowMacroGoals(needsMacroGoals);
 
         if (!needsMacroGoals) {
-          // Ensure today's log exists
+          const tkn = await getToken();
           await convex.mutation(api.meals.getOrCreateDailyLog, {
-            externalUserId: authUser!.id,
+            token: tkn,
             date: getTodayDateString(),
             targetCalories: prefs.macroTargets?.calories ?? DEFAULT_SKIP_TARGETS.calories,
             targetProtein: prefs.macroTargets?.protein ?? DEFAULT_SKIP_TARGETS.protein,
@@ -317,7 +315,7 @@ function AppInner() {
   }, [loadDashboardData, selectedDate, showMacroGoals, user, authUser]);
 
   const handleAuthComplete = useCallback(
-    async (authedUser: AuthUser, _isNewUser: boolean) => {
+    (authedUser: AuthUser, _isNewUser: boolean) => {
       setAuthUser(authedUser);
     },
     []
@@ -373,9 +371,9 @@ function AppInner() {
       try {
         await handleUpdatePreferences(prefs);
 
-        // Create today's log with new targets
+        const tkn = await getToken();
         await convex.mutation(api.meals.getOrCreateDailyLog, {
-          externalUserId: currentUserId,
+          token: tkn,
           date: getTodayDateString(),
           targetCalories: targets.calories,
           targetProtein: targets.protein,
@@ -432,10 +430,11 @@ function AppInner() {
 
     try {
       const today = getTodayDateString();
+      const tkn = await getToken();
 
       // Ensure today's log exists
       const log = await convex.mutation(api.meals.getOrCreateDailyLog, {
-        externalUserId: currentUserId,
+        token: tkn,
         date: today,
         targetCalories: macroTargets.calories,
         targetProtein: macroTargets.protein,
@@ -463,7 +462,7 @@ function AppInner() {
 
       // Save scan to Convex
       await convex.mutation(api.meals.saveScan, {
-        externalUserId: currentUserId,
+        token: tkn,
         scanId: scanResult.id,
         imageUri: capturedImage,
         resultJson: JSON.stringify(scanResult),
@@ -471,8 +470,8 @@ function AppInner() {
 
       // Add meal entry
       await convex.mutation(api.meals.addMealEntry, {
+        token: tkn,
         dailyLogId: log._id,
-        externalUserId: currentUserId,
         scanId: scanResult.id,
         foodName: mealName,
         calories: scanResult.totalCalories,
@@ -484,7 +483,7 @@ function AppInner() {
 
       // Record activity for streak
       await convex.mutation(api.meals.recordActivity, {
-        externalUserId: currentUserId,
+        token: tkn,
         date: today,
       });
 
@@ -517,9 +516,10 @@ function AppInner() {
     }) => {
       try {
         const today = getTodayDateString();
+        const tkn = await getToken();
 
         const log = await convex.mutation(api.meals.getOrCreateDailyLog, {
-          externalUserId: currentUserId,
+          token: tkn,
           date: today,
           targetCalories: macroTargets.calories,
           targetProtein: macroTargets.protein,
@@ -530,8 +530,8 @@ function AppInner() {
         if (!log) throw new Error("Failed to get daily log");
 
         await convex.mutation(api.meals.addMealEntry, {
+          token: tkn,
           dailyLogId: log._id,
-          externalUserId: currentUserId,
           foodName: entry.foodName,
           calories: entry.calories,
           protein: entry.protein,
@@ -541,7 +541,7 @@ function AppInner() {
         });
 
         await convex.mutation(api.meals.recordActivity, {
-          externalUserId: currentUserId,
+          token: tkn,
           date: today,
         });
 
@@ -614,6 +614,36 @@ function AppInner() {
           void handleUpdatePreferences(prefs);
         }}
         onClose={() => setOverlayScreen("tabs")}
+        onClearTodayData={async () => {
+          try {
+            const tkn = await getToken();
+            const today = getTodayDateString();
+            const meals = await convex.query(api.meals.getMealsForDate, {
+              token: tkn,
+              date: today,
+            });
+            for (const meal of meals) {
+              await convex.mutation(api.meals.deleteMealEntry, {
+                token: tkn,
+                id: meal.id as any,
+              });
+            }
+            await loadDashboardData(today, user);
+            Alert.alert("Cleared", "Today's meal data has been cleared.");
+          } catch (err) {
+            console.error("Clear today error:", err);
+            Alert.alert("Error", "Failed to clear today's data");
+          }
+        }}
+        onResetSettings={async () => {
+          const defaultPrefs: UserPreferences = {
+            goals: [],
+            priorities: {},
+            macroTargets: DEFAULT_SKIP_TARGETS,
+          };
+          await handleUpdatePreferences(defaultPrefs);
+          Alert.alert("Reset", "Settings have been reset to defaults.");
+        }}
       />
     );
   }
@@ -640,7 +670,7 @@ function AppInner() {
         </View>
       </View>
     ) : scanResult && capturedImage ? (
-      <ResultsScreenWithRemaining
+      <ResultsScreen
         result={scanResult}
         imageUri={capturedImage}
         onSave={handleSaveScan}
@@ -675,7 +705,9 @@ function AppInner() {
             }}
             onDeleteMeal={async (mealId: string) => {
               try {
+                const tkn = await getToken();
                 await convex.mutation(api.meals.deleteMealEntry, {
+                  token: tkn,
                   id: mealId as any,
                 });
                 await loadDashboardData(selectedDate, user);
@@ -692,16 +724,16 @@ function AppInner() {
         )}
 
         {activeTab === "history" && (
-          <HistoryPlaceholder
+          <HistoryScreen
             recentMeals={recentMeals}
             onManualEntry={() => setOverlayScreen("manual")}
           />
         )}
 
         {activeTab === "profile" && (
-          <ProfilePlaceholder
-            user={user}
-            authUser={authUser}
+          <ProfileScreen
+            displayName={authUser?.displayName ?? "Unknown"}
+            email={authUser?.email ?? "Unknown"}
             apiHealthy={apiHealthy}
             onOpenSettings={() => setOverlayScreen("settings")}
             onSignOut={handleSignOut}
@@ -728,149 +760,6 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
-// ---- Placeholder Components ----
-
-const HistoryPlaceholder: React.FC<{
-  recentMeals: RecentMeal[];
-  onManualEntry: () => void;
-}> = ({ recentMeals, onManualEntry }) => {
-  return (
-    <View style={styles.placeholderScreen}>
-      <Text style={styles.placeholderTitle}>History</Text>
-      <Text style={styles.placeholderSubtitle}>
-        Detailed history view coming soon.
-      </Text>
-
-      <View style={[styles.placeholderCard, shadows.sm]}>
-        <Text style={styles.placeholderCardTitle}>Recent Entries</Text>
-        <Text style={styles.placeholderCardValue}>{recentMeals.length}</Text>
-      </View>
-
-      <Pressable style={styles.manualEntryButton} onPress={onManualEntry}>
-        <Text style={styles.manualEntryText}>Add Manual Entry</Text>
-      </Pressable>
-    </View>
-  );
-};
-
-const ProfilePlaceholder: React.FC<{
-  user: UserData | null;
-  authUser: AuthUser | null;
-  apiHealthy: boolean;
-  onOpenSettings: () => void;
-  onSignOut: () => void;
-}> = ({ user, authUser, apiHealthy, onOpenSettings, onSignOut }) => {
-  return (
-    <View style={styles.placeholderScreen}>
-      <Text style={styles.placeholderTitle}>Profile</Text>
-      <Text style={styles.placeholderSubtitle}>Account and preferences</Text>
-
-      <View style={[styles.placeholderCard, shadows.sm]}>
-        <Text style={styles.placeholderCardTitle}>Name</Text>
-        <Text style={styles.placeholderCardValue}>
-          {authUser?.displayName ?? "Unknown"}
-        </Text>
-      </View>
-
-      <View style={[styles.placeholderCard, shadows.sm]}>
-        <Text style={styles.placeholderCardTitle}>Email</Text>
-        <Text style={styles.placeholderCardValue}>
-          {authUser?.email ?? "Unknown"}
-        </Text>
-      </View>
-
-      <View style={[styles.placeholderCard, shadows.sm]}>
-        <Text style={styles.placeholderCardTitle}>API Status</Text>
-        <Text
-          style={[
-            styles.placeholderCardValue,
-            apiHealthy ? styles.goodStatus : styles.badStatus,
-          ]}
-        >
-          {apiHealthy ? "Online" : "Offline"}
-        </Text>
-      </View>
-
-      <Pressable style={styles.settingsOpenButton} onPress={onOpenSettings}>
-        <Text style={styles.settingsOpenText}>Open Settings</Text>
-      </Pressable>
-
-      <Pressable style={styles.signOutButton} onPress={onSignOut}>
-        <Text style={styles.signOutText}>Sign Out</Text>
-      </Pressable>
-    </View>
-  );
-};
-
-const TabBar: React.FC<{
-  activeTab: TabKey;
-  onTabPress: (tab: TabKey) => void;
-  onScanPress: () => void;
-}> = ({ activeTab, onTabPress, onScanPress }) => {
-  const items: Array<{ key: TabKey; label: string; icon: string }> = [
-    { key: "home", label: "Home", icon: "🏠" },
-    { key: "progress", label: "Progress", icon: "📈" },
-    { key: "history", label: "History", icon: "🧾" },
-    { key: "profile", label: "Profile", icon: "👤" },
-  ];
-
-  return (
-    <View style={styles.tabBarWrap}>
-      <View style={[styles.tabBar, shadows.lg]}>
-        <View style={styles.tabGroup}>
-          {items.slice(0, 2).map((item) => (
-            <Pressable
-              key={item.key}
-              style={styles.tabButton}
-              onPress={() => onTabPress(item.key)}
-            >
-              <Text style={styles.tabIcon}>{item.icon}</Text>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === item.key && styles.tabLabelActive,
-                ]}
-              >
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.centerGap} />
-
-        <View style={styles.tabGroup}>
-          {items.slice(2).map((item) => (
-            <Pressable
-              key={item.key}
-              style={styles.tabButton}
-              onPress={() => onTabPress(item.key)}
-            >
-              <Text style={styles.tabIcon}>{item.icon}</Text>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === item.key && styles.tabLabelActive,
-                ]}
-              >
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-
-      <Pressable
-        style={[styles.scanFab, shadows.lg]}
-        onPress={onScanPress}
-      >
-        <Text style={styles.scanFabIcon}>＋</Text>
-        <Text style={styles.scanFabText}>Scan</Text>
-      </Pressable>
-    </View>
-  );
-};
 
 const styles = StyleSheet.create({
   container: {
@@ -915,142 +804,5 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: spacing.sm,
     textAlign: "center",
-  },
-  tabBarWrap: {
-    position: "relative",
-  },
-  tabBar: {
-    minHeight: 74,
-    backgroundColor: colors.background.card,
-    borderTopWidth: 1,
-    borderTopColor: colors.neutral[200],
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    paddingTop: spacing.sm,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  tabGroup: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "space-around",
-  },
-  centerGap: {
-    width: 76,
-  },
-  tabButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 56,
-  },
-  tabIcon: {
-    fontSize: typography.fontSizes.md,
-    marginBottom: 2,
-  },
-  tabLabel: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.text.tertiary,
-  },
-  tabLabelActive: {
-    color: colors.primary[600],
-    fontWeight: typography.fontWeights.semibold,
-  },
-  scanFab: {
-    position: "absolute",
-    alignSelf: "center",
-    top: -20,
-    width: 74,
-    height: 74,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.primary[500],
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 4,
-    borderColor: colors.background.secondary,
-  },
-  scanFabIcon: {
-    fontSize: typography.fontSizes.xl,
-    color: colors.text.inverse,
-    lineHeight: typography.fontSizes.xl,
-  },
-  scanFabText: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.text.inverse,
-    fontWeight: typography.fontWeights.semibold,
-    marginTop: 2,
-  },
-  placeholderScreen: {
-    flex: 1,
-    padding: spacing.md,
-    backgroundColor: colors.background.secondary,
-  },
-  placeholderTitle: {
-    fontSize: typography.fontSizes.xxl,
-    fontWeight: typography.fontWeights.bold,
-    color: colors.text.primary,
-  },
-  placeholderSubtitle: {
-    marginTop: spacing.xs,
-    marginBottom: spacing.lg,
-    fontSize: typography.fontSizes.sm,
-    color: colors.text.secondary,
-  },
-  placeholderCard: {
-    marginBottom: spacing.sm,
-    backgroundColor: colors.background.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.neutral[200],
-    padding: spacing.md,
-  },
-  placeholderCardTitle: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.text.secondary,
-    marginBottom: spacing.xs,
-  },
-  placeholderCardValue: {
-    fontSize: typography.fontSizes.lg,
-    fontWeight: typography.fontWeights.semibold,
-    color: colors.text.primary,
-  },
-  goodStatus: {
-    color: colors.success,
-  },
-  badStatus: {
-    color: colors.error,
-  },
-  manualEntryButton: {
-    marginTop: spacing.md,
-    backgroundColor: colors.secondary[400],
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.sm,
-    alignItems: "center",
-  },
-  manualEntryText: {
-    color: colors.text.primary,
-    fontWeight: typography.fontWeights.semibold,
-  },
-  settingsOpenButton: {
-    marginTop: spacing.md,
-    backgroundColor: colors.primary[500],
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.sm,
-    alignItems: "center",
-  },
-  settingsOpenText: {
-    color: colors.text.inverse,
-    fontWeight: typography.fontWeights.semibold,
-  },
-  signOutButton: {
-    marginTop: spacing.md,
-    backgroundColor: colors.error,
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.sm,
-    alignItems: "center",
-  },
-  signOutText: {
-    color: colors.text.inverse,
-    fontWeight: typography.fontWeights.semibold,
   },
 });

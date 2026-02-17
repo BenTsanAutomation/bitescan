@@ -81,6 +81,13 @@ export default defineSchema({
     .index("by_externalUserId", ["externalUserId"])
     .index("by_timestamp", ["timestamp"]),
 
+  // Rate limiting
+  rateLimits: defineTable({
+    key: v.string(), // e.g. "signin:user@example.com"
+    attempts: v.number(),
+    windowStart: v.number(), // timestamp
+  }).index("by_key", ["key"]),
+
   // User streaks
   userStreaks: defineTable({
     externalUserId: v.string(),

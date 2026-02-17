@@ -24,7 +24,7 @@ interface AuthScreenProps {
   ) => Promise<{ user: AuthUser; verificationCode: string }>;
   onVerifyEmail: (email: string, code: string) => Promise<void>;
   onResendCode: (email: string) => Promise<string>;
-  onRequestPasswordReset?: (email: string) => Promise<{ sent: boolean; code?: string }>;
+  onRequestPasswordReset?: (email: string) => Promise<{ sent: boolean }>;
   onResetPassword?: (email: string, code: string, newPassword: string) => Promise<void>;
 }
 

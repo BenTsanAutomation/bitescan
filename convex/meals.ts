@@ -1,6 +1,8 @@
 // Convex functions for daily logs, meal entries, scans, and streaks
+// All functions require a valid session token for authorization.
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireAuth } from "./authMiddleware";
 
 // ============================================================
 // DAILY LOGS
@@ -8,7 +10,7 @@ import { v } from "convex/values";
 
 export const getOrCreateDailyLog = mutation({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
     targetCalories: v.number(),
     targetProtein: v.number(),
@@ -16,19 +18,19 @@ export const getOrCreateDailyLog = mutation({
     targetFat: v.number(),
   },
   handler: async (ctx, args) => {
-    // Check if log exists
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const existing = await ctx.db
       .query("dailyLogs")
       .withIndex("by_user_date", (q) =>
-        q.eq("externalUserId", args.externalUserId).eq("date", args.date)
+        q.eq("externalUserId", externalUserId).eq("date", args.date)
       )
       .first();
 
     if (existing) return existing;
 
-    // Create new log
     const id = await ctx.db.insert("dailyLogs", {
-      externalUserId: args.externalUserId,
+      externalUserId,
       date: args.date,
       targetCalories: args.targetCalories,
       targetProtein: args.targetProtein,
@@ -42,14 +44,16 @@ export const getOrCreateDailyLog = mutation({
 
 export const getDailyLog = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     return await ctx.db
       .query("dailyLogs")
       .withIndex("by_user_date", (q) =>
-        q.eq("externalUserId", args.externalUserId).eq("date", args.date)
+        q.eq("externalUserId", externalUserId).eq("date", args.date)
       )
       .first();
   },
@@ -61,8 +65,8 @@ export const getDailyLog = query({
 
 export const addMealEntry = mutation({
   args: {
+    token: v.string(),
     dailyLogId: v.id("dailyLogs"),
-    externalUserId: v.string(),
     scanId: v.optional(v.string()),
     foodName: v.string(),
     calories: v.number(),
@@ -72,9 +76,17 @@ export const addMealEntry = mutation({
     timestamp: v.number(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
+    // Verify the daily log belongs to this user
+    const log = await ctx.db.get(args.dailyLogId);
+    if (!log || log.externalUserId !== externalUserId) {
+      throw new Error("Daily log not found or access denied");
+    }
+
     return await ctx.db.insert("mealEntries", {
       dailyLogId: args.dailyLogId,
-      externalUserId: args.externalUserId,
+      externalUserId,
       scanId: args.scanId,
       foodName: args.foodName,
       calories: args.calories,
@@ -88,14 +100,16 @@ export const addMealEntry = mutation({
 
 export const getMealsForDate = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const log = await ctx.db
       .query("dailyLogs")
       .withIndex("by_user_date", (q) =>
-        q.eq("externalUserId", args.externalUserId).eq("date", args.date)
+        q.eq("externalUserId", externalUserId).eq("date", args.date)
       )
       .first();
 
@@ -106,7 +120,6 @@ export const getMealsForDate = query({
       .withIndex("by_dailyLogId", (q) => q.eq("dailyLogId", log._id))
       .collect();
 
-    // Get scan image URIs
     const results = await Promise.all(
       meals.map(async (meal) => {
         let imageUri: string | undefined;
@@ -137,8 +150,18 @@ export const getMealsForDate = query({
 });
 
 export const deleteMealEntry = mutation({
-  args: { id: v.id("mealEntries") },
+  args: {
+    token: v.string(),
+    id: v.id("mealEntries"),
+  },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
+    const entry = await ctx.db.get(args.id);
+    if (!entry || entry.externalUserId !== externalUserId) {
+      throw new Error("Meal entry not found or access denied");
+    }
+
     await ctx.db.delete(args.id);
   },
 });
@@ -149,14 +172,16 @@ export const deleteMealEntry = mutation({
 
 export const getMacroTotalsForDate = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const log = await ctx.db
       .query("dailyLogs")
       .withIndex("by_user_date", (q) =>
-        q.eq("externalUserId", args.externalUserId).eq("date", args.date)
+        q.eq("externalUserId", externalUserId).eq("date", args.date)
       )
       .first();
 
@@ -183,14 +208,16 @@ export const getMacroTotalsForDate = query({
 
 export const getRemainingMacros = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const log = await ctx.db
       .query("dailyLogs")
       .withIndex("by_user_date", (q) =>
-        q.eq("externalUserId", args.externalUserId).eq("date", args.date)
+        q.eq("externalUserId", externalUserId).eq("date", args.date)
       )
       .first();
 
@@ -237,16 +264,18 @@ export const getRemainingMacros = query({
 
 export const getWeeklyMacroSummary = query({
   args: {
-    externalUserId: v.string(),
-    dates: v.array(v.string()), // Array of YYYY-MM-DD strings for the week
+    token: v.string(),
+    dates: v.array(v.string()),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const results = await Promise.all(
       args.dates.map(async (date) => {
         const log = await ctx.db
           .query("dailyLogs")
           .withIndex("by_user_date", (q) =>
-            q.eq("externalUserId", args.externalUserId).eq("date", date)
+            q.eq("externalUserId", externalUserId).eq("date", date)
           )
           .first();
 
@@ -283,17 +312,18 @@ export const getWeeklyMacroSummary = query({
 
 export const getMealDaysWithEntries = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     dates: v.array(v.string()),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
     const daysWithMeals: string[] = [];
 
     for (const date of args.dates) {
       const log = await ctx.db
         .query("dailyLogs")
         .withIndex("by_user_date", (q) =>
-          q.eq("externalUserId", args.externalUserId).eq("date", date)
+          q.eq("externalUserId", externalUserId).eq("date", date)
         )
         .first();
 
@@ -319,24 +349,25 @@ export const getMealDaysWithEntries = query({
 
 export const saveScan = mutation({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     scanId: v.string(),
     imageUri: v.string(),
     resultJson: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     await ctx.db.insert("scans", {
-      externalUserId: args.externalUserId,
+      externalUserId,
       scanId: args.scanId,
       imageUri: args.imageUri,
       resultJson: args.resultJson,
     });
 
-    // Update last scan time on profile
     const profile = await ctx.db
       .query("profiles")
       .withIndex("by_externalId", (q) =>
-        q.eq("externalId", args.externalUserId)
+        q.eq("externalId", externalUserId)
       )
       .first();
 
@@ -348,19 +379,19 @@ export const saveScan = mutation({
 
 export const getScanHistory = query({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const scans = await ctx.db
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
+    return await ctx.db
       .query("scans")
       .withIndex("by_externalUserId", (q) =>
-        q.eq("externalUserId", args.externalUserId)
+        q.eq("externalUserId", externalUserId)
       )
       .order("desc")
       .take(args.limit ?? 50);
-
-    return scans;
   },
 });
 
@@ -369,18 +400,20 @@ export const getScanHistory = query({
 // ============================================================
 
 export const getStreak = query({
-  args: { externalUserId: v.string() },
+  args: { token: v.string() },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const streak = await ctx.db
       .query("userStreaks")
       .withIndex("by_externalUserId", (q) =>
-        q.eq("externalUserId", args.externalUserId)
+        q.eq("externalUserId", externalUserId)
       )
       .first();
 
     return (
       streak ?? {
-        externalUserId: args.externalUserId,
+        externalUserId,
         currentStreak: 0,
         longestStreak: 0,
         lastActiveDate: undefined,
@@ -391,20 +424,22 @@ export const getStreak = query({
 
 export const recordActivity = mutation({
   args: {
-    externalUserId: v.string(),
+    token: v.string(),
     date: v.string(),
   },
   handler: async (ctx, args) => {
+    const { externalUserId } = await requireAuth(ctx, args.token);
+
     const streak = await ctx.db
       .query("userStreaks")
       .withIndex("by_externalUserId", (q) =>
-        q.eq("externalUserId", args.externalUserId)
+        q.eq("externalUserId", externalUserId)
       )
       .first();
 
     if (!streak) {
       await ctx.db.insert("userStreaks", {
-        externalUserId: args.externalUserId,
+        externalUserId,
         currentStreak: 1,
         longestStreak: 1,
         lastActiveDate: args.date,
