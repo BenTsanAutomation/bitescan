@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Test Gemini Vision API with real food analysis
@@ -22,7 +23,7 @@ async def test_gemini_food_analysis():
     """Test the actual _analyze_with_gemini function logic"""
     
     # API key scoped to this test ONLY (same as in server.py)
-    GEMINI_API_KEY = "REDACTED"
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
     
     print("🍔 Testing Gemini Food Analysis")
     print("=" * 60)

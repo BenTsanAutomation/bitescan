@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Test Google Gemini Vision API with hardcoded key
@@ -12,7 +13,7 @@ def test_gemini_api():
     """Test if Gemini Vision API works with hardcoded key"""
     
     # API key scoped to this test ONLY
-    GEMINI_API_KEY = "REDACTED"
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
     
     print("🔧 Configuring Gemini API...")
     genai.configure(api_key=GEMINI_API_KEY)

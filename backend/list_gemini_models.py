@@ -1,9 +1,10 @@
+import os
 #!/usr/bin/env python3
 """List available Gemini models"""
 
 import google.generativeai as genai
 
-GEMINI_API_KEY = "REDACTED"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
