@@ -1,8 +1,8 @@
-import React, { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { borderRadius, shadows, spacing, typography, ThemeColors } from "../theme";
-import { DailyMacroSummary, MacroTargets } from "../types";
-import { useThemeContext } from "../contexts/ThemeContext";
+import React, { useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { borderRadius, shadows, spacing, typography, ThemeColors } from '../theme';
+import { DailyMacroSummary, MacroTargets } from '../types';
+import { useThemeContext } from '../contexts/ThemeContext';
 
 interface ProgressScreenProps {
   data: DailyMacroSummary[];
@@ -13,10 +13,73 @@ interface ProgressScreenProps {
 
 const MAX_BAR_HEIGHT = 160;
 
+type MacroDeltaSet = {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+
 const getDateLabel = (dateKey: string): string => {
   const parsed = new Date(`${dateKey}T00:00:00`);
-  const labels = ["S", "M", "T", "W", "T", "F", "S"];
-  return labels[parsed.getDay()] ?? "?";
+  const labels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  return labels[parsed.getDay()] ?? '?';
+};
+
+const averageOf = (rows: DailyMacroSummary[]): MacroDeltaSet => {
+  const count = Math.max(1, rows.length);
+  return {
+    calories: rows.reduce((sum, row) => sum + row.calories, 0) / count,
+    protein: rows.reduce((sum, row) => sum + row.protein, 0) / count,
+    carbs: rows.reduce((sum, row) => sum + row.carbs, 0) / count,
+    fat: rows.reduce((sum, row) => sum + row.fat, 0) / count,
+  };
+};
+
+const formatDelta = (value: number, unit: string): string => {
+  const rounded = Math.round(value);
+  if (rounded === 0) return `On target (${unit})`;
+  if (rounded > 0) return `+${rounded} ${unit}`;
+  return `${rounded} ${unit}`;
+};
+
+const formatWeeklyDelta = (value: number, unit: string): string => {
+  const rounded = Math.round(value);
+  if (rounded === 0) return `0 ${unit}`;
+  if (rounded > 0) return `↑ ${rounded} ${unit}`;
+  return `↓ ${Math.abs(rounded)} ${unit}`;
+};
+
+const coachingHints = (goalVsActual: MacroDeltaSet, weeklyDelta: MacroDeltaSet | null): string[] => {
+  const hints: string[] = [];
+
+  if (goalVsActual.calories > 180) {
+    hints.push('Average calories are above target. Trim sauces or liquid calories this week.');
+  } else if (goalVsActual.calories < -180) {
+    hints.push('Calories are below target. Add one balanced snack to support consistency.');
+  }
+
+  if (goalVsActual.protein < -15) {
+    hints.push('Protein is trending low. Add 20-30g protein at your next meal.');
+  }
+
+  if (goalVsActual.carbs > 30) {
+    hints.push('Carbs are running high. Pair carb-heavy meals with lean protein and fiber.');
+  }
+
+  if (goalVsActual.fat > 12) {
+    hints.push('Fat intake is above target. Watch oils, dressings, and fried sides.');
+  }
+
+  if (weeklyDelta && weeklyDelta.calories < -120 && goalVsActual.protein > -10) {
+    hints.push('Nice progress: calories are down week-over-week without sacrificing protein.');
+  }
+
+  if (hints.length === 0) {
+    hints.push('You are close to target averages. Keep portions steady and maintain your logging streak.');
+  }
+
+  return hints.slice(0, 3);
 };
 
 export const ProgressScreen: React.FC<ProgressScreenProps> = ({
@@ -28,59 +91,64 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({
   const { colors } = useThemeContext();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const maxCalories = useMemo(
-    () => Math.max(macroTargets.calories, 1, ...data.map((entry) => entry.calories)),
-    [data, macroTargets.calories]
+  const sortedData = useMemo(
+    () => [...data].sort((a, b) => (a.date < b.date ? -1 : 1)),
+    [data]
   );
 
-  const averageCalories = useMemo(() => {
-    if (data.length === 0) return 0;
-    return (
-      data.reduce((sum, row) => sum + row.calories, 0) /
-      Math.max(1, data.length)
-    );
-  }, [data]);
+  const maxCalories = useMemo(
+    () => Math.max(macroTargets.calories, 1, ...sortedData.map((entry) => entry.calories)),
+    [sortedData, macroTargets.calories]
+  );
 
-  const goalVsActual = useMemo(() => {
+  const avg = useMemo(() => averageOf(sortedData), [sortedData]);
+
+  const goalVsActual = useMemo<MacroDeltaSet>(
+    () => ({
+      calories: avg.calories - macroTargets.calories,
+      protein: avg.protein - macroTargets.protein,
+      carbs: avg.carbs - macroTargets.carbs,
+      fat: avg.fat - macroTargets.fat,
+    }),
+    [avg, macroTargets]
+  );
+
+  const weeklyDelta = useMemo<MacroDeltaSet | null>(() => {
+    if (sortedData.length < 4) return null;
+    const windowSize = sortedData.length >= 14 ? 7 : Math.floor(sortedData.length / 2);
+    if (windowSize < 2) return null;
+
+    const currentWindow = sortedData.slice(-windowSize);
+    const previousWindow = sortedData.slice(-windowSize * 2, -windowSize);
+    if (previousWindow.length === 0) return null;
+
+    const currentAvg = averageOf(currentWindow);
+    const previousAvg = averageOf(previousWindow);
+
     return {
-      calories: averageCalories - macroTargets.calories,
-      protein:
-        data.reduce((sum, row) => sum + row.protein, 0) /
-          Math.max(1, data.length) -
-        macroTargets.protein,
-      carbs:
-        data.reduce((sum, row) => sum + row.carbs, 0) /
-          Math.max(1, data.length) -
-        macroTargets.carbs,
-      fat:
-        data.reduce((sum, row) => sum + row.fat, 0) / Math.max(1, data.length) -
-        macroTargets.fat,
+      calories: currentAvg.calories - previousAvg.calories,
+      protein: currentAvg.protein - previousAvg.protein,
+      carbs: currentAvg.carbs - previousAvg.carbs,
+      fat: currentAvg.fat - previousAvg.fat,
     };
-  }, [averageCalories, data, macroTargets]);
+  }, [sortedData]);
 
-  const averageLineHeight = (averageCalories / maxCalories) * MAX_BAR_HEIGHT;
+  const hints = useMemo(() => coachingHints(goalVsActual, weeklyDelta), [goalVsActual, weeklyDelta]);
+  const averageLineHeight = (avg.calories / maxCalories) * MAX_BAR_HEIGHT;
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Progress</Text>
-      <Text style={styles.subtitle}>Nutrition trend and goal tracking</Text>
+      <Text style={styles.subtitle}>Nutrition trend, weekly movement, and coaching cues</Text>
 
       <View style={styles.rangeRow}>
         {[7, 14, 30].map((value) => (
           <Pressable
             key={value}
             onPress={() => onRangeChange(value as 7 | 14 | 30)}
-            style={[
-              styles.rangeChip,
-              range === value && styles.rangeChipActive,
-            ]}
+            style={[styles.rangeChip, range === value && styles.rangeChipActive]}
           >
-            <Text
-              style={[
-                styles.rangeChipText,
-                range === value && styles.rangeChipTextActive,
-              ]}
-            >
+            <Text style={[styles.rangeChipText, range === value && styles.rangeChipTextActive]}>
               {value}d
             </Text>
           </Pressable>
@@ -91,7 +159,7 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({
         <Text style={styles.cardTitle}>Daily Calories</Text>
         <View style={styles.chartWrap}>
           <View style={[styles.averageLine, { bottom: Math.max(4, averageLineHeight) }]} />
-          {data.map((day) => {
+          {sortedData.map((day) => {
             const barHeight = (day.calories / maxCalories) * MAX_BAR_HEIGHT;
             return (
               <View key={day.date} style={styles.barCol}>
@@ -104,32 +172,64 @@ export const ProgressScreen: React.FC<ProgressScreenProps> = ({
             );
           })}
         </View>
-        <Text style={styles.averageLabel}>
-          Avg: {Math.round(averageCalories)} kcal/day
-        </Text>
+        <Text style={styles.averageLabel}>Avg: {Math.round(avg.calories)} kcal/day</Text>
       </View>
 
       <View style={[styles.summaryCard, shadows.sm]}>
         <Text style={styles.cardTitle}>Goal vs Actual (Avg / day)</Text>
-        <SummaryCell label="Calories" value={formatDelta(goalVsActual.calories, "kcal")} />
-        <SummaryCell label="Protein" value={formatDelta(goalVsActual.protein, "g")} />
-        <SummaryCell label="Carbs" value={formatDelta(goalVsActual.carbs, "g")} />
-        <SummaryCell label="Fat" value={formatDelta(goalVsActual.fat, "g")} />
+        <SummaryCell styles={styles} label="Calories" value={formatDelta(goalVsActual.calories, 'kcal')} />
+        <SummaryCell styles={styles} label="Protein" value={formatDelta(goalVsActual.protein, 'g')} />
+        <SummaryCell styles={styles} label="Carbs" value={formatDelta(goalVsActual.carbs, 'g')} />
+        <SummaryCell styles={styles} label="Fat" value={formatDelta(goalVsActual.fat, 'g')} />
       </View>
-    </View>
+
+      <View style={[styles.summaryCard, shadows.sm]}>
+        <Text style={styles.cardTitle}>Weekly Delta (Recent vs Prior)</Text>
+        {weeklyDelta ? (
+          <>
+            <SummaryCell
+              styles={styles}
+              label="Calories"
+              value={formatWeeklyDelta(weeklyDelta.calories, 'kcal/day')}
+            />
+            <SummaryCell
+              styles={styles}
+              label="Protein"
+              value={formatWeeklyDelta(weeklyDelta.protein, 'g/day')}
+            />
+            <SummaryCell
+              styles={styles}
+              label="Carbs"
+              value={formatWeeklyDelta(weeklyDelta.carbs, 'g/day')}
+            />
+            <SummaryCell
+              styles={styles}
+              label="Fat"
+              value={formatWeeklyDelta(weeklyDelta.fat, 'g/day')}
+            />
+          </>
+        ) : (
+          <Text style={styles.pendingDeltaText}>Log a few more days to unlock weekly delta insights.</Text>
+        )}
+      </View>
+
+      <View style={[styles.summaryCard, shadows.sm]}>
+        <Text style={styles.cardTitle}>Coaching Hints</Text>
+        {hints.map((hint) => (
+          <Text key={hint} style={styles.hintText}>
+            • {hint}
+          </Text>
+        ))}
+      </View>
+    </ScrollView>
   );
 };
 
-const formatDelta = (value: number, unit: string): string => {
-  const rounded = Math.round(value);
-  if (rounded === 0) return `On target (${unit})`;
-  if (rounded > 0) return `+${rounded} ${unit}`;
-  return `${rounded} ${unit}`;
-};
-
-const SummaryCell: React.FC<{ label: string; value: string }> = ({ label, value }) => {
-  const { colors } = useThemeContext();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+const SummaryCell: React.FC<{
+  styles: ReturnType<typeof createStyles>;
+  label: string;
+  value: string;
+}> = ({ styles, label, value }) => {
   return (
     <View style={styles.summaryCell}>
       <Text style={styles.summaryLabel}>{label}</Text>
@@ -143,8 +243,11 @@ const createStyles = (colors: ThemeColors) =>
     container: {
       flex: 1,
       backgroundColor: colors.background.secondary,
+    },
+    content: {
       padding: spacing.md,
       gap: spacing.md,
+      paddingBottom: spacing.xxl,
     },
     title: {
       fontSize: typography.fontSizes.xxl,
@@ -158,7 +261,7 @@ const createStyles = (colors: ThemeColors) =>
       marginBottom: spacing.sm,
     },
     rangeRow: {
-      flexDirection: "row",
+      flexDirection: 'row',
       gap: spacing.sm,
     },
     rangeChip: {
@@ -196,14 +299,14 @@ const createStyles = (colors: ThemeColors) =>
       marginBottom: spacing.sm,
     },
     chartWrap: {
-      flexDirection: "row",
-      alignItems: "flex-end",
-      justifyContent: "space-between",
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
       minHeight: 210,
-      position: "relative",
+      position: 'relative',
     },
     averageLine: {
-      position: "absolute",
+      position: 'absolute',
       left: 0,
       right: 0,
       height: 2,
@@ -217,7 +320,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     barCol: {
       flex: 1,
-      alignItems: "center",
+      alignItems: 'center',
       gap: spacing.xs,
     },
     barValue: {
@@ -229,11 +332,11 @@ const createStyles = (colors: ThemeColors) =>
       height: MAX_BAR_HEIGHT,
       borderRadius: borderRadius.full,
       backgroundColor: colors.neutral[100],
-      justifyContent: "flex-end",
-      overflow: "hidden",
+      justifyContent: 'flex-end',
+      overflow: 'hidden',
     },
     barFill: {
-      width: "100%",
+      width: '100%',
       backgroundColor: colors.primary[500],
       borderRadius: borderRadius.full,
       minHeight: 4,
@@ -266,6 +369,16 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: typography.fontSizes.sm,
       fontWeight: typography.fontWeights.semibold,
       color: colors.text.primary,
+    },
+    pendingDeltaText: {
+      fontSize: typography.fontSizes.sm,
+      color: colors.text.secondary,
+      lineHeight: 20,
+    },
+    hintText: {
+      fontSize: typography.fontSizes.sm,
+      color: colors.text.primary,
+      lineHeight: 20,
     },
   });
 

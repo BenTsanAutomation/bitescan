@@ -1,0 +1,19 @@
+[Unit]
+Description=BiteScan FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=deez
+WorkingDirectory=/home/deez/.openclaw/workspace/bitescan/backend
+Environment="PATH=/home/deez/.local/bin:/usr/bin:/usr/local/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/home/deez/.openclaw/workspace/bitescan/backend/.env
+ExecStart=/usr/bin/python3 -m uvicorn server:app --host 127.0.0.1 --port 8420 --workers 2
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -14,14 +14,19 @@ export type ManualEntryParams = {
     carbs: number;
     fat: number;
   };
+  title?: string;
+  subtitle?: string;
+  saveLabel?: string;
 };
 
 export type RootStackParamList = {
   Auth: undefined;
   MacroGoals: undefined;
   MainTabs: undefined;
-  Camera: undefined;
+  Camera: { initialMode?: "food" | "menu" | "packaged" } | undefined;
   Results: undefined;
+  MenuResults: undefined;
+  QuickAdd: undefined;
   ManualEntry: ManualEntryParams | undefined;
   Settings: undefined;
 };

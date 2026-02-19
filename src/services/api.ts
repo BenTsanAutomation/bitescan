@@ -27,8 +27,10 @@ function withTimeout<T>(operation: (signal: AbortSignal) => Promise<T>): Promise
 
 export async function analyzeFoodImage(
   imageBase64: string,
-  userPreferences: UserPreferences
+  userPreferences: UserPreferences,
+  mode: 'food' | 'menu' = 'food'
 ): Promise<ScanResult> {
+  const endpoint = mode === 'menu' ? '/analyze-menu' : '/analyze';
   return withTimeout(async (signal) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -38,7 +40,7 @@ export async function analyzeFoodImage(
       headers['X-API-Token'] = API_TOKEN;
     }
 
-    const response = await fetch(`${API_BASE_URL}/analyze`, {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({

@@ -50,6 +50,9 @@ const parsePreferences = (preferencesJson?: string): UserPreferences => {
       tasteProfile: parsed.tasteProfile,
       useMetric: parsed.useMetric,
       darkMode: parsed.darkMode,
+      mealRemindersEnabled: parsed.mealRemindersEnabled,
+      mealReminderHour: parsed.mealReminderHour,
+      mealReminderMinute: parsed.mealReminderMinute,
     };
   } catch {
     return defaultPreferences;

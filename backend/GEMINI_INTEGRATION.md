@@ -16,7 +16,7 @@ Successfully integrated Google Gemini API for food image analysis in BiteScan ba
 - **Security:** Function-scoped, NOT global
 
 ### 2. Dependencies ✅
-- ✅ Added `google-generativeai>=0.3.0` to requirements.txt
+- ✅ Added `google-genai>=0.3.0` to requirements.txt
 - ✅ Added `Pillow>=10.0.0` for image processing
 - ✅ Installed all dependencies successfully
 
@@ -61,7 +61,7 @@ async def _analyze_with_gemini(image_path: str, preferences: UserPreferences, ap
     # API key scoped to this function ONLY - do NOT use elsewhere
     GEMINI_API_KEY = "<REDACTED_GEMINI_KEY_OLD>"
     
-    import google.generativeai as genai
+    from google import genai
     from PIL import Image
     
     genai.configure(api_key=GEMINI_API_KEY)
@@ -222,7 +222,7 @@ The backend supports multiple vision providers:
 - [x] API key added to `server.py`
 - [x] Key scoped to function only (NOT global)
 - [x] Security comment added to file header
-- [x] Dependencies installed (`google-generativeai`, `Pillow`)
+- [x] Dependencies installed (`google-genai`, `Pillow`)
 - [x] Model updated to `gemini-2.0-flash-lite`
 - [x] Fallback to `gemini-2.0-flash` implemented
 - [x] Test scripts created
@@ -251,7 +251,7 @@ The backend supports multiple vision providers:
 
 ### Modified
 - `server.py` - Added Gemini integration with scoped API key
-- `requirements.txt` - Enabled google-generativeai and Pillow
+- `requirements.txt` - Enabled google-genai and Pillow
 - `README.md` - Added API Key Security section
 
 ### Created

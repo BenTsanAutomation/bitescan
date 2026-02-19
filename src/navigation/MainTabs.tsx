@@ -63,6 +63,7 @@ export const MainTabs: React.FC = () => {
     deletingMealIds,
     deleteMeal,
     refreshHistory,
+    exportMealHistoryCsv,
     totalMealsLogged,
     totalScans,
     isApiHealthy,
@@ -115,6 +116,9 @@ export const MainTabs: React.FC = () => {
                   },
                 })
               }
+              onQuickAdd={() => rootNavigation.navigate("QuickAdd")}
+              onScanMenu={() => rootNavigation.navigate("Camera", { initialMode: "menu" })}
+              onScanBarcode={() => rootNavigation.navigate("Camera", { initialMode: "packaged" })}
             />
           </ScreenBoundary>
         )}
@@ -142,6 +146,7 @@ export const MainTabs: React.FC = () => {
               onManualEntry={() => rootNavigation.navigate("ManualEntry")}
               onDeleteMeal={deleteMeal}
               onRefresh={refreshHistory}
+              onExportCsv={exportMealHistoryCsv}
               onMealPress={(meal) =>
                 rootNavigation.navigate("ManualEntry", {
                   mealId: meal.id,

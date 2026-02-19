@@ -43,7 +43,7 @@ pip install -r requirements.txt
 # pip install openai>=1.0.0
 
 # If using Gemini instead:
-# pip install google-generativeai Pillow
+# pip install google-genai Pillow
 ```
 
 ### 4. Start Server

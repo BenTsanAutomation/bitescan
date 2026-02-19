@@ -17,6 +17,7 @@ interface HistoryScreenProps {
   meals: RecentMeal[];
   deletingMealIds: string[];
   onManualEntry: () => void;
+  onExportCsv?: () => Promise<{ fileUri: string; rowCount: number }>;
   onDeleteMeal: (mealId: string) => Promise<void>;
   onMealPress: (meal: RecentMeal) => void;
   onRefresh: () => Promise<void>;
@@ -42,6 +43,7 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
   meals,
   deletingMealIds,
   onManualEntry,
+  onExportCsv,
   onDeleteMeal,
   onMealPress,
   onRefresh,
@@ -49,6 +51,7 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
   const { colors } = useThemeContext();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const sections = useMemo<HistorySection[]>(() => {
     const grouped = new Map<string, RecentMeal[]>();
@@ -84,6 +87,16 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
     }
   };
 
+  const handleExport = async () => {
+    if (!onExportCsv || exporting) return;
+    setExporting(true);
+    try {
+      await onExportCsv();
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <SectionList
       sections={sections}
@@ -103,9 +116,16 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
         <View style={styles.headerWrap}>
           <Text style={styles.title}>History</Text>
           <Text style={styles.subtitle}>Last 30 days of meals</Text>
-          <Pressable style={styles.manualEntryButton} onPress={onManualEntry}>
-            <Text style={styles.manualEntryText}>Add Manual Entry</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable style={styles.manualEntryButton} onPress={onManualEntry}>
+              <Text style={styles.manualEntryText}>Add Manual Entry</Text>
+            </Pressable>
+            {onExportCsv ? (
+              <Pressable style={styles.exportButton} onPress={() => void handleExport()} disabled={exporting}>
+                <Text style={styles.exportButtonText}>{exporting ? "Exporting..." : "Export CSV"}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       }
       renderSectionHeader={({ section }) => (
@@ -181,14 +201,33 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.text.secondary,
     },
     manualEntryButton: {
+      flex: 1,
       backgroundColor: colors.secondary[400],
       borderRadius: borderRadius.full,
       paddingVertical: spacing.sm,
       alignItems: "center",
-      marginBottom: spacing.sm,
     },
     manualEntryText: {
       color: colors.text.primary,
+      fontWeight: typography.fontWeights.semibold,
+    },
+    headerActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      marginBottom: spacing.sm,
+    },
+    exportButton: {
+      flex: 1,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.primary[300],
+      backgroundColor: colors.background.card,
+      justifyContent: "center",
+      alignItems: "center",
+      paddingVertical: spacing.sm,
+    },
+    exportButtonText: {
+      color: colors.primary[700],
       fontWeight: typography.fontWeights.semibold,
     },
     sectionHeader: {

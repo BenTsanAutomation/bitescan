@@ -340,6 +340,45 @@ Return only valid JSON:
 }}
 """
 
+MENU_SCAN_PROMPT = """Analyze this restaurant menu image and detect every visible food item.
+
+User goals: {goals}
+Macro targets per meal: calories={calories} kcal, protein={protein} g, carbs={carbs} g, fat={fat} g
+
+Important:
+- Detect ALL distinct menu items visible in the image (do not skip items).
+- Estimate realistic nutrition for each item based on common restaurant portions.
+- Rank foods from best to worst macro fit for the user's macro targets.
+- Keep the foods array ordered by that ranking (best fit first).
+
+Return only valid JSON:
+{{
+  "foods": [
+    {{
+      "name": "...",
+      "nameLocalized": null,
+      "cuisine": "...",
+      "portion": "...",
+      "nutrition": {{
+        "calories": 350,
+        "protein": 25.5,
+        "carbs": 40,
+        "fat": 12,
+        "fiber": 3,
+        "sugar": 5,
+        "sodium": 800
+      }},
+      "grade": "B",
+      "gradeReason": "...",
+      "confidence": 85
+    }}
+  ],
+  "overallGrade": "B",
+  "recommendation": "...",
+  "userGoalsMatch": 70
+}}
+"""
+
 
 CROWD_TASTE_BASELINES: dict[str, int] = {
     "burrito": 78,
@@ -485,10 +524,27 @@ def _clean_json_response(text: str) -> str:
 
 
 def _build_analysis_prompt(preferences: UserPreferences) -> str:
+    goals_str = _goals_string(preferences)
+    return ANALYSIS_PROMPT.format(goals=goals_str)
+
+
+def _goals_string(preferences: UserPreferences) -> str:
     goals_str = ", ".join(
         f"{goal} (priority: {preferences.priorities.get(goal, 50)}%)" for goal in preferences.goals
     ) or "general health"
-    return ANALYSIS_PROMPT.format(goals=goals_str)
+    return goals_str
+
+
+def _build_menu_scan_prompt(preferences: UserPreferences) -> str:
+    goals_str = _goals_string(preferences)
+    targets = _derive_macro_targets(preferences)
+    return MENU_SCAN_PROMPT.format(
+        goals=goals_str,
+        calories=targets.calories,
+        protein=targets.protein,
+        carbs=targets.carbs,
+        fat=targets.fat,
+    )
 
 
 def _derive_macro_targets(preferences: UserPreferences) -> MacroTargets:
@@ -650,10 +706,16 @@ def _normalize_nutrition(nutrition: dict[str, Any], request_id: str) -> Nutritio
     )
 
 
-async def _analyze_with_claude(image_path: str, preferences: UserPreferences, api_key: str) -> dict[str, Any]:
+async def _analyze_with_claude(
+    image_path: str,
+    preferences: UserPreferences,
+    api_key: str,
+    prompt: Optional[str] = None,
+) -> dict[str, Any]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
+    request_prompt = prompt or _build_analysis_prompt(preferences)
     with open(image_path, "rb") as f:
         image_data = base64.b64encode(f.read()).decode()
 
@@ -669,7 +731,7 @@ async def _analyze_with_claude(image_path: str, preferences: UserPreferences, ap
             "role": "user",
             "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_data}},
-                {"type": "text", "text": _build_analysis_prompt(preferences)},
+                {"type": "text", "text": request_prompt},
             ],
         }],
     )
@@ -678,10 +740,16 @@ async def _analyze_with_claude(image_path: str, preferences: UserPreferences, ap
     return json.loads(text)
 
 
-async def _analyze_with_openai(image_path: str, preferences: UserPreferences, api_key: str) -> dict[str, Any]:
+async def _analyze_with_openai(
+    image_path: str,
+    preferences: UserPreferences,
+    api_key: str,
+    prompt: Optional[str] = None,
+) -> dict[str, Any]:
     import openai
 
     client = openai.OpenAI(api_key=api_key)
+    request_prompt = prompt or _build_analysis_prompt(preferences)
     with open(image_path, "rb") as f:
         image_data = base64.b64encode(f.read()).decode()
 
@@ -693,7 +761,7 @@ async def _analyze_with_openai(image_path: str, preferences: UserPreferences, ap
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-                {"type": "text", "text": _build_analysis_prompt(preferences)},
+                {"type": "text", "text": request_prompt},
             ],
         }],
     )
@@ -702,16 +770,38 @@ async def _analyze_with_openai(image_path: str, preferences: UserPreferences, ap
     return json.loads(text)
 
 
-async def _analyze_with_gemini(image_path: str, preferences: UserPreferences, api_key: str) -> dict[str, Any]:
-    import google.generativeai as genai
-    from PIL import Image
+async def _analyze_with_gemini(
+    image_path: str,
+    preferences: UserPreferences,
+    api_key: str,
+    prompt: Optional[str] = None,
+) -> dict[str, Any]:
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    img = Image.open(image_path)
+    client = genai.Client(api_key=api_key)
+    request_prompt = prompt or _build_analysis_prompt(preferences)
+    with open(image_path, "rb") as f:
+        image_data = f.read()
 
-    response = await asyncio.to_thread(model.generate_content, [_build_analysis_prompt(preferences), img])
-    text = _clean_json_response(response.text.strip())
+    mime_type = "image/jpeg"
+    if image_path.lower().endswith(".png"):
+        mime_type = "image/png"
+
+    response = await asyncio.to_thread(
+        client.models.generate_content,
+        model="gemini-2.0-flash",
+        contents=[
+            types.Part.from_text(text=request_prompt),
+            types.Part.from_bytes(data=image_data, mime_type=mime_type),
+        ],
+    )
+
+    response_text = getattr(response, "text", None)
+    if not response_text:
+        raise ValueError("Gemini response missing text")
+
+    text = _clean_json_response(response_text.strip())
     return json.loads(text)
 
 
@@ -730,7 +820,11 @@ def _providers() -> list[tuple[str, str]]:
     return providers
 
 
-async def analyze_with_fallback(image_path: str, preferences: UserPreferences) -> dict[str, Any]:
+async def analyze_with_fallback(
+    image_path: str,
+    preferences: UserPreferences,
+    prompt: Optional[str] = None,
+) -> dict[str, Any]:
     providers = _providers()
     if not providers:
         raise RuntimeError("No vision API configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY.")
@@ -739,10 +833,19 @@ async def analyze_with_fallback(image_path: str, preferences: UserPreferences) -
     for provider_name, key in providers:
         try:
             if provider_name == "anthropic":
-                return await asyncio.wait_for(_analyze_with_claude(image_path, preferences, key), timeout=SETTINGS.request_timeout_seconds)
+                return await asyncio.wait_for(
+                    _analyze_with_claude(image_path, preferences, key, prompt=prompt),
+                    timeout=SETTINGS.request_timeout_seconds,
+                )
             if provider_name == "openai":
-                return await asyncio.wait_for(_analyze_with_openai(image_path, preferences, key), timeout=SETTINGS.request_timeout_seconds)
-            return await asyncio.wait_for(_analyze_with_gemini(image_path, preferences, key), timeout=SETTINGS.request_timeout_seconds)
+                return await asyncio.wait_for(
+                    _analyze_with_openai(image_path, preferences, key, prompt=prompt),
+                    timeout=SETTINGS.request_timeout_seconds,
+                )
+            return await asyncio.wait_for(
+                _analyze_with_gemini(image_path, preferences, key, prompt=prompt),
+                timeout=SETTINGS.request_timeout_seconds,
+            )
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             logger.warning("Provider %s failed: %s", provider_name, exc)
@@ -750,9 +853,13 @@ async def analyze_with_fallback(image_path: str, preferences: UserPreferences) -
     raise RuntimeError(f"All vision providers failed. Last error: {last_error}")
 
 
-async def analyze_with_gemini(image_path: str, preferences: UserPreferences) -> dict[str, Any]:
+async def analyze_with_gemini(
+    image_path: str,
+    preferences: UserPreferences,
+    prompt: Optional[str] = None,
+) -> dict[str, Any]:
     # backward compatibility for older tests/scripts
-    return await analyze_with_fallback(image_path, preferences)
+    return await analyze_with_fallback(image_path, preferences, prompt=prompt)
 
 
 def _validated_food_items(analysis: dict[str, Any], scan_id: str, preferences: UserPreferences) -> tuple[list[FoodItem], int]:
@@ -799,40 +906,48 @@ def _validated_food_items(analysis: dict[str, Any], scan_id: str, preferences: U
     return foods, total_calories
 
 
-def _cache_key(image_bytes: bytes, preferences: UserPreferences) -> str:
+def _cache_key(image_bytes: bytes, preferences: UserPreferences, cache_namespace: str = "food") -> str:
     pref_blob = preferences.model_dump_json(exclude_none=True, exclude_defaults=False)
-    digest = hashlib.sha256(image_bytes + pref_blob.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(image_bytes + pref_blob.encode("utf-8") + cache_namespace.encode("utf-8")).hexdigest()
     return digest
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(_: Request, exc: Exception):
-    logger.exception("Unhandled server error: %s", exc)
-    return JSONResponse(status_code=500, content={"success": False, "error": "Internal server error"})
-
-
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_food(request: AnalyzeRequest):
+async def _run_analysis(
+    request: AnalyzeRequest,
+    *,
+    endpoint_name: str,
+    prompt: Optional[str] = None,
+    cache_namespace: str = "food",
+    rank_by_macro_fit: bool = False,
+) -> AnalyzeResponse:
     request_id = str(uuid.uuid4())
     start = time.perf_counter()
 
     temp_path: Optional[str] = None
     try:
         image_data = base64.b64decode(request.imageBase64, validate=True)
-        cache_key = _cache_key(image_data, request.userPreferences)
+        cache_key = _cache_key(image_data, request.userPreferences, cache_namespace=cache_namespace)
         cached = await analysis_cache.get(cache_key)
         if cached:
-            logger.info("analyze_cache_hit request_id=%s", request_id)
+            logger.info("%s_cache_hit request_id=%s", endpoint_name, request_id)
             return AnalyzeResponse.model_validate(cached)
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
             f.write(image_data)
             temp_path = f.name
 
-        analysis = await analyze_with_fallback(temp_path, request.userPreferences)
+        analysis = await analyze_with_fallback(temp_path, request.userPreferences, prompt=prompt)
 
         scan_id = str(uuid.uuid4())
         foods, total_calories = _validated_food_items(analysis, scan_id, request.userPreferences)
+        if rank_by_macro_fit:
+            foods.sort(
+                key=lambda item: (
+                    item.macroFit.score if item.macroFit else 0,
+                    item.confidence,
+                ),
+                reverse=True,
+            )
         meal_recs = _build_meal_recommendations(foods, SETTINGS.max_recommendations)
 
         user_match = int(analysis.get("userGoalsMatch", 50))
@@ -855,22 +970,48 @@ async def analyze_food(request: AnalyzeRequest):
         await analysis_cache.set(cache_key, payload.model_dump(mode="json"))
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        logger.info("analyze_success request_id=%s foods=%d elapsed_ms=%d", request_id, len(result.foods), elapsed_ms)
+        logger.info("%s_success request_id=%s foods=%d elapsed_ms=%d", endpoint_name, request_id, len(result.foods), elapsed_ms)
         return payload
 
     except (ValueError, json.JSONDecodeError) as exc:
-        logger.warning("analyze_validation_failed request_id=%s error=%s", request_id, exc)
+        logger.warning("%s_validation_failed request_id=%s error=%s", endpoint_name, request_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.exception("analyze_failed request_id=%s error=%s", request_id, exc)
+        logger.exception("%s_failed request_id=%s error=%s", endpoint_name, request_id, exc)
         return AnalyzeResponse(success=False, error="Failed to analyze image")
     finally:
         if temp_path:
             path = Path(temp_path)
             if path.exists():
                 path.unlink(missing_ok=True)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_: Request, exc: Exception):
+    logger.exception("Unhandled server error: %s", exc)
+    return JSONResponse(status_code=500, content={"success": False, "error": "Internal server error"})
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_food(request: AnalyzeRequest):
+    return await _run_analysis(
+        request,
+        endpoint_name="analyze",
+        cache_namespace="food",
+    )
+
+
+@app.post("/analyze-menu", response_model=AnalyzeResponse)
+async def analyze_menu(request: AnalyzeRequest):
+    return await _run_analysis(
+        request,
+        endpoint_name="analyze_menu",
+        prompt=_build_menu_scan_prompt(request.userPreferences),
+        cache_namespace="menu",
+        rank_by_macro_fit=True,
+    )
 
 
 @app.get("/health")

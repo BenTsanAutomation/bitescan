@@ -5,7 +5,7 @@ pydantic>=2.5.0
 # Vision AI providers (at least one required)
 anthropic>=0.18.0
 # openai>=1.0.0  # Uncomment to use OpenAI GPT-4V
-google-generativeai>=0.3.0
+google-genai>=1.0.0
 Pillow>=10.0.0  # Required for Gemini
 
 # Testing

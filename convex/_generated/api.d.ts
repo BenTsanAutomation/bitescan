@@ -13,6 +13,7 @@ import type * as authMiddleware from "../authMiddleware.js";
 import type * as cleanup from "../cleanup.js";
 import type * as crons from "../crons.js";
 import type * as email from "../email.js";
+import type * as favorites from "../favorites.js";
 import type * as files from "../files.js";
 import type * as meals from "../meals.js";
 
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   cleanup: typeof cleanup;
   crons: typeof crons;
   email: typeof email;
+  favorites: typeof favorites;
   files: typeof files;
   meals: typeof meals;
 }>;

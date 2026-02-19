@@ -5,9 +5,10 @@ Test Google Gemini Vision API with hardcoded key
 """
 
 import sys
-import json
+import io
 from PIL import Image
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 def test_gemini_api():
     """Test if Gemini Vision API works with hardcoded key"""
@@ -16,26 +17,33 @@ def test_gemini_api():
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
     
     print("🔧 Configuring Gemini API...")
-    genai.configure(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
     
     print("✓ API configured with provided key")
     
     try:
         # Use the newest Gemini 2.0 Flash model
-        model = genai.GenerativeModel('gemini-2.0-flash')
         print("✓ Model loaded: gemini-2.0-flash")
         
         # Create a simple test image
         print("🔄 Creating test image (100x100 red square)...")
         img = Image.new('RGB', (100, 100), color='red')
+        image_buffer = io.BytesIO()
+        img.save(image_buffer, format="PNG")
         
         # Simple test prompt
         prompt = "What is the main color in this image? Reply in one word."
         
         print("🔄 Testing vision API...")
-        response = model.generate_content([prompt, img])
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(data=image_buffer.getvalue(), mime_type="image/png"),
+            ],
+        )
         
-        result = response.text.strip()
+        result = (response.text or "").strip()
         print(f"✓ API Response: '{result}'")
         
         if 'red' in result.lower():

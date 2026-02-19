@@ -1,7 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -16,14 +17,18 @@ import { borderRadius, shadows, spacing, typography } from "../theme";
 import AuthScreen from "../screens/AuthScreen";
 import { CameraScreen } from "../screens/CameraScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
+import { MenuResultsScreen } from "../screens/MenuResultsScreen";
 import MacroGoalsScreen from "../screens/MacroGoalsScreen";
 import ManualEntryScreen from "../screens/ManualEntryScreen";
+import { QuickAddScreen } from "../screens/QuickAddScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { MainTabs } from "./MainTabs";
 import { RootStackParamList } from "./types";
 import { useAuth } from "../contexts/AuthContext";
 import { useMeals } from "../contexts/MealContext";
 import { useThemeContext } from "../contexts/ThemeContext";
+import { lookupBarcodeFood } from "../services/barcode";
+import { useLocalMealReminders } from "../hooks/useLocalMealReminders";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -72,16 +77,35 @@ export const AppNavigator: React.FC = () => {
     startScanAnalysis,
     clearScanAnalysis,
     saveCurrentScan,
+    saveMenuItemFromCurrentScan,
     addManualEntry,
     updateMeal,
     historyMeals,
     setSelectedDate,
     deleteMeal,
+    exportMealHistoryCsv,
   } = useMeals();
 
   const connectionState = useConvexConnectionState();
   const isOffline =
     connectionState.hasEverConnected && !connectionState.isWebSocketConnected;
+  const reminderHour = preferences.mealReminderHour ?? 18;
+  const reminderMinute = preferences.mealReminderMinute ?? 0;
+
+  const handleReminder = useCallback(() => {
+    Alert.alert(
+      "Meal Reminder",
+      "Log your next meal to stay on target for today.",
+      [{ text: "OK" }]
+    );
+  }, []);
+
+  useLocalMealReminders({
+    enabled: !!authUser && !!preferences.mealRemindersEnabled,
+    hour: reminderHour,
+    minute: reminderMinute,
+    onReminder: handleReminder,
+  });
 
   const navigationTheme = useMemo<NavigationTheme>(
     () => ({
@@ -157,8 +181,9 @@ export const AppNavigator: React.FC = () => {
         >
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Camera">
-            {({ navigation }) => (
+            {({ navigation, route }) => (
               <CameraScreen
+                initialMode={route.params?.initialMode ?? "food"}
                 onCapture={async (imageUri) => {
                   try {
                     await startScanAnalysis(imageUri, preferences);
@@ -171,6 +196,52 @@ export const AppNavigator: React.FC = () => {
                     Alert.alert("Analysis Failed", message);
                     navigation.goBack();
                   }
+                }}
+                onCaptureMenu={async (imageUri) => {
+                  try {
+                    await startScanAnalysis(imageUri, preferences, "menu");
+                    navigation.replace("MenuResults");
+                  } catch (error) {
+                    const message =
+                      error instanceof Error
+                        ? error.message
+                        : "Could not analyze the menu image.";
+                    Alert.alert("Menu Analysis Failed", message);
+                    navigation.goBack();
+                  }
+                }}
+                onBarcodeDetected={async (barcode) => {
+                  const found = await lookupBarcodeFood(barcode);
+                  clearScanAnalysis();
+
+                  if (!found) {
+                    navigation.replace("ManualEntry", {
+                      title: "Barcode Not Found",
+                      subtitle: `No reliable lookup for ${barcode}. Enter nutrition from the package label.`,
+                      saveLabel: "Save Manual Entry",
+                      initialEntry: {
+                        foodName: `Barcode ${barcode}`,
+                        calories: 0,
+                        protein: 0,
+                        carbs: 0,
+                        fat: 0,
+                      },
+                    });
+                    return;
+                  }
+
+                  navigation.replace("ManualEntry", {
+                    title: "Barcode Match",
+                    subtitle: `Loaded from Open Food Facts${found.brandName ? ` (${found.brandName})` : ""}. Verify with package label before saving.`,
+                    saveLabel: "Add from Barcode",
+                    initialEntry: {
+                      foodName: found.foodName,
+                      calories: found.nutrition.calories,
+                      protein: found.nutrition.protein,
+                      carbs: found.nutrition.carbs,
+                      fat: found.nutrition.fat,
+                    },
+                  });
                 }}
                 onClose={() => navigation.goBack()}
               />
@@ -196,7 +267,7 @@ export const AppNavigator: React.FC = () => {
                   result={scanResult}
                   imageUri={capturedImage}
                   remainingMacros={remainingMacros}
-                  onRescan={() => navigation.replace("Camera")}
+                  onRescan={() => navigation.replace("Camera", { initialMode: "food" })}
                   onClose={() => {
                     clearScanAnalysis();
                     navigation.popToTop();
@@ -230,6 +301,59 @@ export const AppNavigator: React.FC = () => {
             }
           </Stack.Screen>
 
+          <Stack.Screen name="MenuResults">
+            {({ navigation }) =>
+              isAnalyzing ? (
+                <View
+                  style={[
+                    styles.loadingContainer,
+                    { backgroundColor: colors.background.secondary },
+                  ]}
+                >
+                  <ActivityIndicator size="large" color={colors.primary[500]} />
+                  <Text style={[styles.loadingText, { color: colors.text.secondary }]}>
+                    Analyzing menu items...
+                  </Text>
+                </View>
+              ) : scanResult && capturedImage ? (
+                <MenuResultsScreen
+                  result={scanResult}
+                  imageUri={capturedImage}
+                  remainingMacros={remainingMacros}
+                  onRescan={() => navigation.replace("Camera", { initialMode: "menu" })}
+                  onClose={() => {
+                    clearScanAnalysis();
+                    navigation.popToTop();
+                  }}
+                  onLogItem={async (item) => {
+                    try {
+                      await saveMenuItemFromCurrentScan(item);
+                      clearScanAnalysis();
+                      setSelectedDate(getTodayDateString());
+                      navigation.popToTop();
+                      Alert.alert("Saved!", `${item.name} added to your meal log.`);
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "Failed to save scan.";
+                      Alert.alert("Save Failed", message);
+                    }
+                  }}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.loadingContainer,
+                    { backgroundColor: colors.background.secondary },
+                  ]}
+                >
+                  <Text style={[styles.loadingText, { color: colors.text.secondary }]}>
+                    No menu result to display.
+                  </Text>
+                </View>
+              )
+            }
+          </Stack.Screen>
+
           <Stack.Screen
             name="ManualEntry"
             options={{ presentation: "modal" }}
@@ -237,13 +361,20 @@ export const AppNavigator: React.FC = () => {
             {({ route, navigation }) => (
               <ManualEntryScreen
                 initialEntry={route.params?.initialEntry}
-                title={route.params?.mealId ? "Edit Meal" : "Manual Entry"}
-                subtitle={
-                  route.params?.mealId
-                    ? "Update nutrition values for this meal."
-                    : "Add nutrition details when scan results are missing."
+                title={
+                  route.params?.title ??
+                  (route.params?.mealId ? "Edit Meal" : "Manual Entry")
                 }
-                saveLabel={route.params?.mealId ? "Save Changes" : "Save Entry"}
+                subtitle={
+                  route.params?.subtitle ??
+                  (route.params?.mealId
+                    ? "Update nutrition values for this meal."
+                    : "Add nutrition details when scan results are missing.")
+                }
+                saveLabel={
+                  route.params?.saveLabel ??
+                  (route.params?.mealId ? "Save Changes" : "Save Entry")
+                }
                 onCancel={() => navigation.goBack()}
                 onSave={async (entry) => {
                   try {
@@ -302,6 +433,9 @@ export const AppNavigator: React.FC = () => {
                       darkMode: preferences.darkMode,
                       useMetric: preferences.useMetric,
                       tasteProfile: preferences.tasteProfile,
+                      mealRemindersEnabled: preferences.mealRemindersEnabled,
+                      mealReminderHour: preferences.mealReminderHour,
+                      mealReminderMinute: preferences.mealReminderMinute,
                     });
                     Alert.alert("Reset", "Settings have been reset to defaults.");
                   } catch (error) {
@@ -310,6 +444,41 @@ export const AppNavigator: React.FC = () => {
                         ? error.message
                         : "Could not reset settings.";
                     Alert.alert("Error", message);
+                  }
+                }}
+                onExportData={async () => {
+                  try {
+                    const { fileUri, rowCount } = await exportMealHistoryCsv();
+                    await Share.share({
+                      title: "BiteScan meal history",
+                      message: `Meal history export (${rowCount} meals): ${fileUri}`,
+                      url: fileUri,
+                    });
+                  } catch (error) {
+                    const message =
+                      error instanceof Error
+                        ? error.message
+                        : "Could not export meal history.";
+                    Alert.alert("Export Failed", message);
+                  }
+                }}
+              />
+            )}
+          </Stack.Screen>
+
+          <Stack.Screen name="QuickAdd" options={{ presentation: "modal" }}>
+            {({ navigation }) => (
+              <QuickAddScreen
+                externalUserId={authUser.id}
+                onClose={() => navigation.goBack()}
+                onAdd={async (entry) => {
+                  try {
+                    await addManualEntry(entry);
+                    Alert.alert("Added", `${entry.foodName} was added to today.`);
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "Could not add entry.";
+                    Alert.alert("Add Failed", message);
                   }
                 }}
               />

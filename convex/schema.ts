@@ -82,6 +82,20 @@ export default defineSchema({
     .index("by_externalUserId", ["externalUserId"])
     .index("by_timestamp", ["timestamp"]),
 
+  // Favorite foods for quick add
+  favorites: defineTable({
+    externalUserId: v.string(),
+    foodName: v.string(),
+    calories: v.number(),
+    protein: v.number(),
+    carbs: v.number(),
+    fat: v.number(),
+    timesUsed: v.number(),
+    lastUsedAt: v.number(),
+  })
+    .index("by_externalUserId", ["externalUserId"])
+    .index("by_user_food", ["externalUserId", "foodName"]),
+
   // Rate limiting
   rateLimits: defineTable({
     key: v.string(), // e.g. "signin:user@example.com"

@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import { analyzeFoodImage, checkApiHealth, imageToBase64 } from "../services/api";
 import {
   DailyMacroSummary,
+  FoodItem,
   MacroRemaining,
   MacroTargets,
   MacroTotals,
@@ -13,6 +14,7 @@ import {
   UserPreferences,
   UserStreak,
 } from "../types";
+import { buildMealsCsv, writeMealsCsvFile } from "../services/csvExport";
 import { useAuth } from "./AuthContext";
 
 type ManualEntryInput = {
@@ -45,14 +47,17 @@ interface MealContextValue {
   totalScans: number;
   startScanAnalysis: (
     imageUri: string,
-    preferences: UserPreferences
+    preferences: UserPreferences,
+    mode?: "food" | "menu"
   ) => Promise<void>;
   clearScanAnalysis: () => void;
   saveCurrentScan: () => Promise<void>;
+  saveMenuItemFromCurrentScan: (item: FoodItem) => Promise<void>;
   addManualEntry: (entry: ManualEntryInput, date?: string) => Promise<void>;
   updateMeal: (id: string, entry: ManualEntryInput) => Promise<void>;
   deleteMeal: (id: string) => Promise<void>;
   refreshHistory: () => Promise<void>;
+  exportMealHistoryCsv: () => Promise<{ fileUri: string; rowCount: number }>;
 }
 
 const DEFAULT_TARGETS: MacroTargets = {
@@ -72,6 +77,14 @@ const EMPTY_TOTALS: MacroTotals = {
 const MealContext = createContext<MealContextValue | null>(null);
 
 const getTodayDateString = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getDateStamp = (): string => {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -109,7 +122,7 @@ const toRecentMeals = (items: any[] | undefined): RecentMeal[] =>
   }));
 
 export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { token, preferences } = useAuth();
+  const { token, preferences, authUser } = useAuth();
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());
   const [progressRange, setProgressRange] = useState<7 | 14 | 30>(7);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -123,6 +136,7 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateMealMutation = useMutation(api.meals.updateMealEntry);
   const deleteMealMutation = useMutation(api.meals.deleteMealEntry);
   const saveScanMutation = useMutation(api.meals.saveScan);
+  const upsertFavoriteMutation = useMutation(api.favorites.upsertFavorite);
   const recordActivityMutation = useMutation(api.meals.recordActivity);
   const generateUploadUrlMutation = useMutation(api.files.generateUploadUrl);
 
@@ -210,12 +224,16 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const startScanAnalysis = useCallback(
-    async (imageUri: string, userPreferences: UserPreferences) => {
+    async (
+      imageUri: string,
+      userPreferences: UserPreferences,
+      mode: "food" | "menu" = "food"
+    ) => {
       setCapturedImage(imageUri);
       setIsAnalyzing(true);
       try {
         const base64 = await imageToBase64(imageUri);
-        const result = await analyzeFoodImage(base64, userPreferences);
+        const result = await analyzeFoodImage(base64, userPreferences, mode);
         setScanResult(result);
       } finally {
         setIsAnalyzing(false);
@@ -321,9 +339,25 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timestamp: Date.now(),
     });
 
+    if (authUser?.id) {
+      await Promise.all(
+        scanResult.foods.map((food) =>
+          upsertFavoriteMutation({
+            externalUserId: authUser.id,
+            foodName: food.name,
+            calories: food.nutrition.calories,
+            protein: food.nutrition.protein,
+            carbs: food.nutrition.carbs,
+            fat: food.nutrition.fat,
+          })
+        )
+      );
+    }
+
     await recordActivityMutation({ token, date: today });
     setSelectedDate(today);
   }, [
+    authUser?.id,
     addMealMutation,
     capturedImage,
     ensureDailyLogForDate,
@@ -331,8 +365,53 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveScanMutation,
     scanResult,
     token,
+    upsertFavoriteMutation,
     uploadImageToStorage,
   ]);
+
+  const saveMenuItemFromCurrentScan = useCallback(
+    async (item: FoodItem) => {
+      if (!token) throw new Error("Not authenticated");
+      if (!scanResult) throw new Error("No scan available");
+
+      const today = getTodayDateString();
+      const log = await ensureDailyLogForDate(today);
+
+      await addMealMutation({
+        token,
+        dailyLogId: log._id,
+        foodName: item.name,
+        calories: item.nutrition.calories,
+        protein: item.nutrition.protein,
+        carbs: item.nutrition.carbs,
+        fat: item.nutrition.fat,
+        timestamp: Date.now(),
+      });
+
+      if (authUser?.id) {
+        await upsertFavoriteMutation({
+          externalUserId: authUser.id,
+          foodName: item.name,
+          calories: item.nutrition.calories,
+          protein: item.nutrition.protein,
+          carbs: item.nutrition.carbs,
+          fat: item.nutrition.fat,
+        });
+      }
+
+      await recordActivityMutation({ token, date: today });
+      setSelectedDate(today);
+    },
+    [
+      addMealMutation,
+      authUser?.id,
+      ensureDailyLogForDate,
+      recordActivityMutation,
+      scanResult,
+      token,
+      upsertFavoriteMutation,
+    ]
+  );
 
   const addManualEntry = useCallback(
     async (entry: ManualEntryInput, date?: string) => {
@@ -351,6 +430,17 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
         timestamp: Date.now(),
       });
 
+      if (authUser?.id) {
+        await upsertFavoriteMutation({
+          externalUserId: authUser.id,
+          foodName: entry.foodName,
+          calories: entry.calories,
+          protein: entry.protein,
+          carbs: entry.carbs,
+          fat: entry.fat,
+        });
+      }
+
       await recordActivityMutation({
         token,
         date: targetDate,
@@ -358,7 +448,7 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setSelectedDate(targetDate);
     },
-    [addMealMutation, ensureDailyLogForDate, recordActivityMutation, token]
+    [addMealMutation, authUser?.id, ensureDailyLogForDate, recordActivityMutation, token, upsertFavoriteMutation]
   );
 
   const updateMeal = useCallback(
@@ -398,6 +488,17 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await new Promise((resolve) => setTimeout(resolve, 500));
   }, []);
 
+  const exportMealHistoryCsv = useCallback(async () => {
+    const rows = [...historyMeals].sort((a, b) => b.timestamp - a.timestamp);
+    if (rows.length === 0) {
+      throw new Error("No meals available to export.");
+    }
+
+    const csv = buildMealsCsv(rows);
+    const fileUri = await writeMealsCsvFile(csv, getDateStamp());
+    return { fileUri, rowCount: rows.length };
+  }, [historyMeals]);
+
   const value = useMemo<MealContextValue>(
     () => ({
       selectedDate,
@@ -422,10 +523,12 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
       startScanAnalysis,
       clearScanAnalysis,
       saveCurrentScan,
+      saveMenuItemFromCurrentScan,
       addManualEntry,
       updateMeal,
       deleteMeal,
       refreshHistory,
+      exportMealHistoryCsv,
     }),
     [
       addManualEntry,
@@ -442,6 +545,7 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
       refreshHistory,
       remainingMacros,
       saveCurrentScan,
+      saveMenuItemFromCurrentScan,
       scanResult,
       selectedDate,
       startScanAnalysis,
@@ -452,6 +556,7 @@ export const MealProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateMeal,
       weeklySummary,
       deleteMeal,
+      exportMealHistoryCsv,
     ]
   );
 

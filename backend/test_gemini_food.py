@@ -8,10 +8,11 @@ NOTE: Will fail if API quota is exceeded. Quota resets daily.
 import sys
 import json
 import asyncio
-from pathlib import Path
+import io
 from pydantic import BaseModel
 from PIL import Image
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 class UserPreferences(BaseModel):
@@ -41,10 +42,11 @@ async def test_gemini_food_analysis():
     
     try:
         print("2. Configuring Gemini API...")
-        genai.configure(api_key=GEMINI_API_KEY)
-        
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        image_buffer = io.BytesIO()
+        img.save(image_buffer, format="PNG")
+        image_bytes = image_buffer.getvalue()
         print("3. Loading model: gemini-2.0-flash-lite...")
-        model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
         print("4. Building analysis prompt...")
         goals_str = ", ".join([
@@ -90,10 +92,16 @@ Grade scale:
 - F: Fail (junk food)"""
 
         print("5. Calling Gemini Vision API...")
-        response = model.generate_content([prompt, img])
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+            ],
+        )
         
         print("6. Parsing response...")
-        text = response.text.strip()
+        text = (response.text or "").strip()
         
         # Clean markdown if present
         if text.startswith("```"):

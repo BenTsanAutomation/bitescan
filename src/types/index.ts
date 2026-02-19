@@ -34,6 +34,9 @@ export interface UserPreferences {
   tasteProfile?: TasteProfile;
   useMetric?: boolean;
   darkMode?: boolean;
+  mealRemindersEnabled?: boolean;
+  mealReminderHour?: number;
+  mealReminderMinute?: number;
 }
 
 export interface NutritionInfo {
